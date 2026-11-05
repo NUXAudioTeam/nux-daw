@@ -1,0 +1,214 @@
+/* NUX DAW - the audio engine.
+
+   Owns the audio device, the per-track synths and channel strips, the mixer
+   buses, the master bus, the step sequencer and the recorder / WAV exporter.
+
+   Threading contract
+   ------------------
+   * The audio callback only touches engine-owned structures (tracks, buses,
+     atomics) and the sequencer snapshot. It never allocates.
+   * Structural edits (adding tracks, replacing the project, changing insert
+     types) are performed on the message thread while the transport is stopped.
+   * Note releases are scheduled by a sample counter inside the engine, so no
+     note can ever be left hanging because its note-off fell outside a block. */
+#pragma once
+
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <functional>
+#include <array>
+#include <memory>
+
+#include "../nux_core/TrackModel.h"
+#include "ChannelStrip.h"
+#include "Synth.h"
+#include "Transport.h"
+
+namespace nux
+{
+/** One engine-side track: a synth, its channel strip and its render buffer. */
+struct TrackEngine
+{
+    juce::Synthesiser synth;
+    ChannelStrip strip;
+    juce::AudioBuffer<float> buffer;
+};
+
+class AudioEngine final : public juce::AudioIODeviceCallback,
+                          public juce::MidiInputCallback,
+                          private juce::Timer
+{
+public:
+    AudioEngine();
+    ~AudioEngine() override;
+
+    //==============================================================================
+    juce::AudioDeviceManager& getDeviceManager() noexcept { return deviceManager; }
+
+    /** Opens the default audio device. Returns an empty string on success. */
+    juce::String initialiseAudio();
+    void shutdownAudio();
+    bool isAudioAvailable() const noexcept { return audioReady; }
+    juce::String getAudioStatusMessage() const;
+
+    /** Asks the current driver for a low latency setup: the highest sample rate it
+        supports with a 256 sample buffer, falling back to whatever it will accept. */
+    void applyPreferredDeviceSetup();
+
+    //==============================================================================
+    Transport& getTransport() noexcept { return transport; }
+    const Transport& getTransport() const noexcept { return transport; }
+
+    void setProjectState (ProjectState* state);
+    ProjectState* getProjectState() const noexcept { return projectState; }
+
+    /** Re-creates synths / strips / buses from the current project state. */
+    void rebuildGraph();
+
+    /** Pushes fader, pan, mute, send and insert changes into the running graph. */
+    void syncMixerFromState();
+
+    /** Re-reads pattern data (steps) into the sequencer snapshot. */
+    void syncSequencerFromState();
+
+    //==============================================================================
+    float getTrackPeak (int trackIndex, int channel) const;
+    float getMasterPeak (int channel) const;
+    float getLimiterReduction() const;
+    int getNumTracks() const noexcept { return trackCount; }
+    double getSampleRateHint() const noexcept { return sampleRate; }
+    int getBlockSizeHint() const noexcept { return blockSize; }
+    int getTrackBus (int trackIndex) const;
+
+    /** Bus send levels, edited by the mixer's bus strips. */
+    std::array<std::atomic<float>, constants::numMixerBuses>& getBusSendLevels() noexcept { return busDelaySends; }
+    std::array<std::atomic<float>, constants::numMixerBuses>& getBusReverbSendLevels() noexcept { return busReverbSends; }
+    void applyBusSendLevels();
+
+    /** Copies the most recent master output for the UI scope display. */
+    int readScope (float* destination, int maxSamples) const;
+
+    /** Auditions a note from a drum pad, the piano roll or an external MIDI keyboard. */
+    void triggerPreviewNote (int trackIndex, int midiNote, float velocity);
+
+    //==============================================================================
+    void play();
+    void stop();
+    void togglePlay();
+    void startRecording();
+    void stopRecording();
+    void panic();
+
+    //==============================================================================
+    struct ExportOptions
+    {
+        juce::File targetFile;
+        int lengthSteps = constants::defaultNumSteps;
+        double tailSeconds = 1.5;
+    };
+
+    /** Renders the song offline to a 24-bit WAV. Blocks the caller; call from the
+        message thread and show your own progress UI with the callback. */
+    bool exportToWav (const ExportOptions& options, juce::String& error,
+                      const std::function<void (double)>& progress = {});
+
+    bool startRecordingToFile (const juce::File& file, juce::String& error);
+    void stopRecordingToFile();
+    bool isRecordingToFile() const noexcept { return recordingWriter.load (std::memory_order_acquire) != nullptr; }
+    double getRecordingLengthSeconds() const;
+
+    //==============================================================================
+    // Headless helpers, used by the unit tests and by any future offline batch tool.
+
+    /** Prepares the graph without opening an audio device. */
+    void prepareForOfflineRendering (double newSampleRate, int newBlockSize, int numChannels);
+
+    /** Renders `numBlocks` blocks through the graph, discarding the output. */
+    void runBlocksForTest (int numBlocks);
+
+    //==============================================================================
+    void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                           int numInputChannels,
+                                           float* const* outputChannelData,
+                                           int numOutputChannels,
+                                           int numSamples,
+                                           const juce::AudioIODeviceCallbackContext& context) override;
+    void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
+    void audioDeviceStopped() override;
+    void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
+
+private:
+    void prepare (double newSampleRate, int newBlockSize);
+    void renderBlock (juce::AudioBuffer<float>& output, int numSamples);
+    void runSequencer (int numSamples);
+    void processNoteReleases (int numSamples);
+    void noteOn (int trackIndex, int midiNote, float velocity, int sampleOffset);
+    void updateScope (const juce::AudioBuffer<float>& buffer, int numSamples);
+    void timerCallback() override;
+
+    juce::AudioDeviceManager deviceManager;
+    Transport transport;
+
+    ProjectState* projectState = nullptr;
+    int trackCount = 0;
+    bool audioReady = false;
+    juce::String lastDeviceError;
+
+    std::array<TrackEngine, constants::maxTracks> tracks;
+    std::array<StereoBus, constants::numMixerBuses> buses;
+    MasterBus masterBus;
+    std::array<int, constants::maxTracks> trackBusIndex {};
+    std::array<std::atomic<bool>, constants::maxTracks> tracksSoloed {};
+    std::array<std::atomic<float>, constants::numMixerBuses> busDelaySends {};
+    std::array<std::atomic<float>, constants::numMixerBuses> busReverbSends {};
+
+    /** MIDI destined for each track during the current block. */
+    std::array<juce::MidiBuffer, constants::maxTracks> sequencerMidi;
+    std::array<juce::MidiBuffer, constants::maxTracks> previewMidi;
+
+    /** Samples remaining before a note-off is issued, indexed by MIDI note. */
+    std::array<std::array<int, 128>, constants::maxTracks> noteReleaseCountdown {};
+    std::array<std::array<bool, 128>, constants::maxTracks> noteHeld {};
+
+    SynthParameters synthParameters;
+
+    double sampleRate = 44100.0;
+    int blockSize = 512;
+    bool graphPrepared = false;
+    std::atomic<bool> renderingOffline { false };
+
+    /** Sequencer snapshot, written on the message thread between engine calls. */
+    struct TrackSequence
+    {
+        bool isSampler = false;
+        int rootNote = 36;
+        int numSteps = constants::defaultNumSteps;
+        std::array<Step, constants::maxNumSteps> steps {};
+    };
+
+    /* Double buffered so the audio thread never reads a half-written pattern:
+       the message thread fills the inactive copy, then flips the index. */
+    using SequenceSet = std::array<TrackSequence, constants::maxTracks>;
+    std::array<SequenceSet, 2> sequenceSets {};
+    std::atomic<int> activeSequenceSet { 0 };
+    int writeSequenceSet = 1;
+
+    /** Recording to disk. */
+    juce::TimeSliceThread diskThread { "NUX disk writer" };
+    using WriterType = juce::AudioFormatWriter::ThreadedWriter;
+    std::atomic<WriterType*> recordingWriter { nullptr };
+    WriterType* pendingRetirement = nullptr;
+    std::atomic<juce::int64> recordedSamples { 0 };
+    double recordSampleRate = 44100.0;
+    juce::AudioBuffer<float> recordScratch;
+
+    /** Scope ring buffer for the UI. */
+    static constexpr int scopeSize = 1024;
+    std::array<std::atomic<float>, scopeSize> scopeBuffer {};
+    std::atomic<int> scopeWritePos { 0 };
+    int scopeDecimation = 4;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
+};
+}
