@@ -78,6 +78,29 @@ public:
                 }
             }
 
+            const auto editorIndex = args.indexOf ("--insert-editor");
+
+            if (editorIndex > 0 && editorIndex + 1 < args.size() && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                {
+                    const auto message = main->showInsertEditorForDemo (args[editorIndex + 1], 0, 0);
+                    juce::Logger::writeToLog ("Insert editor: " + message);
+
+                    const auto paramIndex = args.indexOf ("--param");
+
+                    if (paramIndex > 0 && paramIndex + 2 < args.size())
+                    {
+                        const auto index = args[paramIndex + 1].getIntValue();
+                        const auto value = args[paramIndex + 2].getDoubleValue();
+                        const auto applied = main->setDemoInsertParameter (index, value);
+                        juce::Logger::writeToLog ("Insert parameter " + juce::String (index)
+                                                    + " = " + juce::String (value)
+                                                    + (applied ? " applied" : " FAILED"));
+                    }
+                }
+            }
+
             const auto shotIndex = args.indexOf ("--screenshot");
 
             if (shotIndex > 0 && shotIndex + 1 < args.size())

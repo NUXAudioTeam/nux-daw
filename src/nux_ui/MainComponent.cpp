@@ -847,6 +847,52 @@ juce::String MainComponent::loadPluginIntoDemoTrack (int trackIndex,
 }
 
 //==============================================================================
+juce::String MainComponent::showInsertEditorForDemo (const juce::String& effectName,
+                                                     int trackIndex, int slotIndex)
+{
+    auto& state = document.getState();
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
+        return "Track " + juce::String (trackIndex) + " does not exist";
+
+    auto& slot = state.tracks[(size_t) trackIndex].inserts[(size_t) slotIndex];
+
+    if (effectName.equalsIgnoreCase ("eq"))            applyInsertDefaults (slot, InsertType::eq);
+    else if (effectName.equalsIgnoreCase ("comp"))     applyInsertDefaults (slot, InsertType::compressor);
+    else if (effectName.equalsIgnoreCase ("delay"))    applyInsertDefaults (slot, InsertType::delay);
+    else if (effectName.equalsIgnoreCase ("reverb"))   applyInsertDefaults (slot, InsertType::reverb);
+
+    engine.syncMixerFromState();
+
+    setWorkspace (Workspace::mixer);
+    mixerView.rebuild();
+    mixerView.showInsertEditor (ChannelStripComponent::Kind::track, trackIndex, slotIndex,
+                                state.tracks[(size_t) trackIndex].name);
+
+    if (auto* editor = mixerView.getInsertEditor())
+    {
+        editor->refreshFromState();
+
+        return "Editor open: " + getInsertDisplayName (slot.type)
+                 + " on " + state.tracks[(size_t) trackIndex].name
+                 + ", " + juce::String ((int) getInsertParameters (slot.type).size()) + " parameters";
+    }
+
+    return "The editor did not open";
+}
+
+bool MainComponent::setDemoInsertParameter (int parameterIndex, double value)
+{
+    if (auto* editor = mixerView.getInsertEditor())
+    {
+        editor->setParameterFromHost (parameterIndex, value);
+        return true;
+    }
+
+    return false;
+}
+
+//==============================================================================
 void MainComponent::exportWav()
 {
     auto defaultFile = document.getProjectFolder()

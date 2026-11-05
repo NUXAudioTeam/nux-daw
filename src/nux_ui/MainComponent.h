@@ -62,6 +62,13 @@ public:
         Used by the headless smoke test and by any future command line tooling. */
     juce::String loadPluginIntoDemoTrack (int trackIndex, const juce::File& pluginFolder,
                                           const juce::String& pluginName);
+
+    /** Opens the mixer with the parameter editor showing one insert, and reports
+        what the editor found there. Used by the headless smoke test. */
+    juce::String showInsertEditorForDemo (const juce::String& effectName, int trackIndex, int slotIndex);
+
+    /** Changes one parameter of the insert currently shown in the editor. */
+    bool setDemoInsertParameter (int parameterIndex, double value);
     void toggleAudioSettings();
     void showAbout();
 

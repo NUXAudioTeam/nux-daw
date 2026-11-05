@@ -54,6 +54,7 @@ target_sources(NUX PRIVATE
     src/nux_ui/PianoRollView.cpp
     src/nux_ui/PluginPanel.cpp
     src/nux_ui/PluginPicker.cpp
+    src/nux_ui/InsertEditorPanel.cpp
     src/nux_ui/AudioSettingsPanel.cpp
     src/nux_ui/TransportBar.cpp
     src/nux_ui/Widgets.cpp
@@ -68,6 +69,7 @@ target_sources(NUX PRIVATE
     src/nux_engine/PluginRetirementQueue.cpp
     src/nux_core/ProjectDocument.cpp
     src/nux_core/ProjectSerializer.cpp
+    src/nux_core/InsertParameters.cpp
     src/nux_core/TrackModel.cpp)
 
 target_include_directories(NUX PRIVATE src)

@@ -8,7 +8,9 @@ target_sources(NUXTests PRIVATE
     AudioClipTests.cpp
     EngineRenderTests.cpp
     PluginHostTests.cpp
+    InsertParameterTests.cpp
     ../src/nux_core/ProjectSerializer.cpp
+    ../src/nux_core/InsertParameters.cpp
     ../src/nux_core/TrackModel.cpp
     ../src/nux_engine/AudioClipPlayer.cpp
     ../src/nux_engine/AudioClipStore.cpp
