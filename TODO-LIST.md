@@ -1,6 +1,6 @@
 # NUX DAW — මොකද ඉතුරු, මොකද කරන්න ඕන
 
-> අවසන් යාවත්කාලීනය: v0.3.0 foundation — [PR #1](https://github.com/hirushanethsara323-jpg/nux-daw/pull/1) (CI green: Windows MSVC + Linux GCC)
+> අවසන් යාවත්කාලීනය: audio clips — [PR #2](https://github.com/hirushanethsara323-jpg/nux-daw/pull/2) (Windows MSVC CI green)
 
 මේක **ඇත්තටම කේතයේ තත්වය** අනුව හදපු ලැයිස්තුවක්. "implemented" කියලා ලියලා තියෙන දේවල් compile වෙලා test වෙලා තියෙනවා; "stub" කියලා තියෙන දේවල් UI එකේ තියෙනවා නමුත් ඇත්තටම වැඩ කරන්නේ නැහැ.
 
@@ -21,13 +21,15 @@
 
 ---
 
-## 🟠 2. v0.3 එකේ අඩුපාඩු — UI තියෙනවා, logic එක නැහැ (stubs)
+## 🟠 2. අඩුපාඩු — UI තියෙනවා, logic එක නැහැ (stubs)
+
+**යාවත්කාලීනය: 2.1 (audio clip playback) අවසන් — PR #2.** ඉතුරු ඒවා පහත.
 
 මේවා දැන් **ඇත්තටම වැඩ කරන්නේ නැහැ**. මම මේවා "implemented" කියලා report කළේ නැහැ:
 
 | # | කාර්යය | දැන් තත්වය | කරන්න ඕන දේ |
 |---|---|---|---|
-| 2.1 | **Audio clip playback** | `AudioClip` data model + `.nux` save/load තියෙනවා. නමුත් engine එකේ **playback code එකක්ම නැහැ** | `AudioFormatManager` + `AudioTransportSource` හෝ pre-loaded buffer, timeline එකට sync කරලා stream කරන්න |
+| 2.1 | **Audio clip playback** | ✅ **[PR #2](https://github.com/hirushanethsara323-jpg/nux-daw/pull/2)** — decode + cache, transport sync, loop retrigger, drag-and-drop import, waveform lane | ඉතුරු: real peak cache, trim/split/move |
 | 2.2 | **Audio recording** | `startRecordingToFile()` engine එකේ තියෙනවා, නමුත් UI එකේ button එකකට **wire කරලා නැහැ** | Record button එක + input channel + latency compensation |
 | 2.3 | **VST3 plugin එක signal path එකට** | Scan කරනවා ✅, editor එක open වෙනවා ✅. නමුත් plugin එකේ **audio processing එක signal chain එකට වැටෙන්නේ නැහැ** | `AudioPluginInstance` එක `InsertProcessor` එකකට wrap කරලා process කරන්න |
 | 2.4 | **VST3 instrument track** | Instrument plugins load වෙනවා, නමුත් built-in synth එක විතරයි note ලබාගන්නේ | Plugin instrument එකකට MIDI route කරන්න |
