@@ -1,0 +1,46 @@
+# Build output
+build/
+cmake-build-*/
+out/
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.app
+*.dSYM/
+.DS_Store
+
+# Visual Studio / CMake user files
+.vs/
+*.sln
+*.vcxproj*
+CMakeUserPresets.json
+CMakeSettings.json
+compile_commands.json
+
+# JUCE generated
+JuceLibraryCode/
+juce_build_tools/
+external/JUCE/lib
+
+# Test / render artefacts
+*.wav
+!resources/*.wav
+test-output/
+render-output/
+*.nux.bak
+
+# Editor / IDE
+.idea/
+.vscode/
+.cache/
+*.swp
+
+# Local secrets - never commit tokens
+.env
+*.token
+secrets.json

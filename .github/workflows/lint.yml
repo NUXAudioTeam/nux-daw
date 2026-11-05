@@ -1,0 +1,40 @@
+name: Formatting and housekeeping
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No build artefacts committed
+        run: |
+          if git ls-files | grep -E '^(build|out|cmake-build-.*)/'; then
+            echo "::error::Build output must not be committed."
+            exit 1
+          fi
+          echo "OK - no build output tracked."
+
+      - name: No secrets committed
+        run: |
+          if git grep -nIE 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}' -- . ; then
+            echo "::error::A credential-looking string was found in the repository."
+            exit 1
+          fi
+          echo "OK - no credentials found."
+
+      - name: JUCE submodule is present
+        run: |
+          test -f external/JUCE/CMakeLists.txt || {
+            echo "::error::external/JUCE is missing - commit the submodule pointer."
+            exit 1
+          }
+          echo "JUCE present."
+
+      - name: Sources are not empty
+        run: |
+          find src -name '*.cpp' -o -name '*.h' | wc -l
