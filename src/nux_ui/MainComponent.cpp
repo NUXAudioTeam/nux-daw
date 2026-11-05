@@ -203,6 +203,11 @@ MainComponent::MainComponent()
     timelineView.onProjectEdited = [this] { refreshAllViews(); };
     timelineView.onPreviewNote = [this] { statusLabel.setText ("", juce::dontSendNotification); };
 
+    timelineView.onAudioFileDropped = [this] (const juce::File& file, int track)
+    {
+        importAudioFileInto (file, track);
+    };
+
     mixerView.onProjectEdited = [this] { refreshAllViews(); };
     pianoRollView.onProjectEdited = [this] { refreshAllViews(); };
 
@@ -568,7 +573,9 @@ void MainComponent::loadProjectFile (const juce::File& file)
     }
 
     engine.setProjectState (&document.getState());
+    engine.setMediaRootDirectory (document.getProjectFolder());
     engine.rebuildGraph();
+    engine.reloadAudioClips();
     transportBar.getTempoKnob().setValue (document.getState().tempo, juce::dontSendNotification);
     refreshAllViews();
     timelineView.rebuild();
@@ -669,6 +676,111 @@ bool MainComponent::confirmCloseProject()
                                   });
 
     return false;
+}
+
+//==============================================================================
+void MainComponent::importAudioFileInto (const juce::File& file, int trackIndex)
+{
+    auto& state = document.getState();
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
+        return;
+
+    auto& track = state.tracks[(size_t) trackIndex];
+
+    // Importing into an instrument track makes it an audio track.
+    if (track.type != TrackType::audio)
+    {
+        track.type = TrackType::audio;
+        track.name = track.name.containsIgnoreCase ("track") ? file.getFileNameWithoutExtension() : track.name;
+    }
+
+    engine.setMediaRootDirectory (document.getProjectFolder());
+
+    juce::String error;
+    const auto relativePath = engine.importAudioFile (file, error);
+
+    if (relativePath.isEmpty())
+    {
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                          .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                          .withTitle ("Could not import the audio file")
+                                          .withMessage (error)
+                                          .withButton ("OK", 1),
+                                      nullptr);
+        return;
+    }
+
+    // Place the clip at the first free bar.
+    int startStep = 0;
+
+    for (const auto& existing : track.audioClips)
+        startStep = juce::jmax (startStep, existing.startStep + existing.lengthSteps);
+
+    AudioClip clip;
+    clip.name = file.getFileNameWithoutExtension();
+    clip.sourceFile = relativePath;
+
+    if (auto loaded = engine.resolveClipFile (relativePath); loaded.existsAsFile())
+    {
+        const auto seconds = engine.getClipLengthSeconds (relativePath);
+        const auto stepsPerSecond = (state.tempo / 60.0) * constants::stepsPerBeat;
+        const auto lengthSteps = juce::jmax (1, (int) std::ceil (seconds * stepsPerSecond));
+
+        clip.lengthSteps = juce::jmin (lengthSteps, constants::maxNumSteps * 4);
+    }
+
+    clip.startStep = juce::jmin (startStep, juce::jmax (0, state.patternLengthSteps - 1));
+
+    // Extend the pattern so the whole clip is inside the loop.
+    const auto clipEnd = clip.startStep + clip.lengthSteps;
+
+    if (clipEnd > state.patternLengthSteps)
+    {
+        auto newLength = state.patternLengthSteps;
+
+        while (newLength < clipEnd && newLength < constants::maxNumSteps)
+            newLength += constants::stepsPerBeat * 4;
+
+        state.patternLengthSteps = juce::jmin (newLength, constants::maxNumSteps);
+        engine.getTransport().setLoopLengthSteps (state.patternLengthSteps);
+    }
+
+    track.audioClips.push_back (clip);
+
+    engine.rebuildGraph();
+    engine.reloadAudioClips();
+    document.markDirty();
+    timelineView.rebuild();
+    refreshAllViews();
+
+    showStatus ("Imported " + file.getFileName() + "  (" + juce::String (clip.lengthSteps) + " steps)");
+}
+
+//==============================================================================
+void MainComponent::loadDemoProjectWithAudioClip (const juce::File& audioFile)
+{
+    auto& state = document.getState();
+
+    // Turn the third track into an audio track and import the file into the project.
+    const auto audioTrackIndex = juce::jmin (2, juce::jmax (0, (int) state.tracks.size() - 1));
+
+    importAudioFileInto (audioFile, audioTrackIndex);
+
+    // Give a second track a note pattern so the screenshot shows both kinds of lane.
+    if (state.tracks.size() > 1)
+    {
+        auto& bass = state.tracks[1];
+        bass.instrumentPreset = 1;   // sub bass
+
+        for (int step = 0; step < constants::defaultNumSteps; step += 2)
+            bass.steps[(size_t) step] = { true, 0.8f };
+
+        engine.syncSequencerFromState();
+    }
+
+    timelineView.rebuild();
+    refreshAllViews();
 }
 
 //==============================================================================

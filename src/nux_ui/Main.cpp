@@ -48,9 +48,66 @@ public:
     const juce::String getApplicationVersion() override { return constants::versionString; }
     bool moreThanOneInstanceAllowed() override          { return true; }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
         mainWindow = std::make_unique<NuxMainWindow> (constants::appName);
+
+        // Headless smoke test: `NUX DAW --demo-clip <file> [--screenshot <png>]`
+        // loads a demo project and renders the UI once, then quits. This keeps the
+        // GUI verifiable in CI environments that have no interactive display.
+        const auto args = juce::StringArray::fromTokens (commandLine, true);
+
+        if (args.contains ("--demo-clip"))
+        {
+            const auto fileIndex = args.indexOf ("--demo-clip") + 1;
+
+            if (fileIndex < args.size() && mainWindow != nullptr)
+                if (auto* main = mainWindow->getMainComponent())
+                    main->loadDemoProjectWithAudioClip (resolvePath (args[fileIndex]));
+
+            const auto shotIndex = args.indexOf ("--screenshot");
+
+            if (shotIndex > 0 && shotIndex + 1 < args.size())
+            {
+                const auto path = args[shotIndex + 1];
+
+                juce::Timer::callAfterDelay (2500, [this, path]
+                {
+                    if (mainWindow != nullptr)
+                        writeWindowScreenshot (*mainWindow, resolvePath (path));
+
+                    juce::JUCEApplication::quit();
+                });
+            }
+        }
+    }
+
+    /** Turns a command line path into a File without ever building one from a relative string. */
+    static juce::File resolvePath (const juce::String& rawPath)
+    {
+        // Windows style quoting can survive into the argument; strip it before use.
+        auto path = rawPath.trim().unquoted();
+
+        if (path.isEmpty())
+            return {};
+
+        return juce::File::isAbsolutePath (path)
+                 ? juce::File (path)
+                 : juce::File::getCurrentWorkingDirectory().getChildFile (path);
+    }
+
+    static void writeWindowScreenshot (juce::Component& component, const juce::File& target)
+    {
+        juce::Image image (juce::Image::ARGB, component.getWidth(), component.getHeight(), true);
+        {
+            juce::Graphics g (image);
+            component.paintEntireComponent (g, true);
+        }
+
+        target.deleteFile();
+        juce::PNGImageFormat png;
+        std::unique_ptr<juce::FileOutputStream> stream (target.createOutputStream());
+        png.writeImageToStream (image, *stream);
     }
 
     void shutdown() override

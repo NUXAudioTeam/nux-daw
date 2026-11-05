@@ -116,6 +116,76 @@ void SequencerGrid::paint (juce::Graphics& g)
             g.fillRect (juce::Rectangle<float> ((float) headerWidth, rowY, gridWidth, (float) rowHeight));
         }
 
+        // Audio tracks show clip blocks instead of step pads.
+        if (trackState.type == TrackType::audio)
+        {
+            for (size_t c = 0; c < trackState.audioClips.size(); ++c)
+            {
+                const auto& clip = trackState.audioClips[c];
+                auto clipBounds = getAudioClipBounds (track, (int) c).reduced (1.0f, 6.0f);
+
+                if (clipBounds.isEmpty())
+                    continue;
+
+                const auto isHovered = hoveredAudioTrack == track && hoveredAudioClip == (int) c;
+                auto colour = trackState.getColour();
+
+                g.setColour (colour.withAlpha (isHovered ? 0.55f : 0.35f));
+                g.fillRoundedRectangle (clipBounds, 3.0f);
+
+                g.setColour (colour.withAlpha (isHovered ? 1.0f : 0.8f));
+                g.drawRoundedRectangle (clipBounds.reduced (0.5f), 3.0f, 1.0f);
+
+                // Clip name.
+                if (clipBounds.getWidth() > 40.0f)
+                {
+                    g.setColour (theme::windowBg.withAlpha (0.85f));
+                    g.setFont (theme::font::bold (10.0f));
+                    g.drawFittedText (clip.name,
+                                      clipBounds.reduced (5.0f, 2.0f).withHeight (13.0f).toNearestInt(),
+                                      juce::Justification::topLeft, 1, 0.7f);
+                }
+
+                // Waveform preview inside the clip.
+                auto waveArea = clipBounds.reduced (3.0f, 16.0f);
+
+                if (waveArea.getHeight() > 6.0f && waveArea.getWidth() > 8.0f)
+                {
+                    g.setColour (colour.withAlpha (0.85f));
+                    const auto centreY = waveArea.getCentreY();
+                    const auto columns = (int) waveArea.getWidth();
+
+                    for (int x = 0; x < columns; ++x)
+                    {
+                        // A deterministic pseudo-waveform until real peaks are cached.
+                        const auto t = (float) x / (float) juce::jmax (1, columns);
+                        const auto envelope = 0.35f + 0.65f * std::abs (std::sin (t * 31.0f + (float) c));
+                        const auto h = waveArea.getHeight() * 0.5f * envelope;
+                        g.drawVerticalLine ((int) (waveArea.getX() + (float) x), centreY - h, centreY + h);
+                    }
+                }
+            }
+
+            // Drop hint while a file is being dragged over this lane.
+            if (pendingDropTrack == track)
+            {
+                g.setColour (theme::accent.withAlpha (0.12f));
+                g.fillRect (juce::Rectangle<float> ((float) headerWidth, rowY, gridWidth, (float) rowHeight));
+                g.setColour (theme::accent.withAlpha (0.8f));
+                g.drawRect (juce::Rectangle<float> ((float) headerWidth, rowY, gridWidth, (float) rowHeight), 1.5f);
+
+                g.setColour (theme::accent);
+                g.setFont (theme::font::bold (11.0f));
+                g.drawFittedText ("DROP AUDIO HERE",
+                                  juce::Rectangle<float> ((float) headerWidth, rowY, gridWidth, (float) rowHeight).toNearestInt(),
+                                  juce::Justification::centred, 1, 0.9f);
+            }
+
+            g.setColour (theme::outline.withAlpha (0.6f));
+            g.drawHorizontalLine ((int) (rowY + (float) rowHeight), (float) headerWidth, bounds.getRight());
+            continue;
+        }
+
         for (int step = 0; step < numSteps; ++step)
         {
             auto cell = getCellBounds (track, step).reduced (cellWidth < 26.0f ? 2.0f : 4.0f, 5.0f);
@@ -178,8 +248,167 @@ void SequencerGrid::paint (juce::Graphics& g)
     }
 }
 
+juce::Rectangle<float> SequencerGrid::getAudioClipBounds (int track, int clipIndex) const
+{
+    const auto& state = document.getState();
+
+    if (! juce::isPositiveAndBelow (track, (int) state.tracks.size()))
+        return {};
+
+    const auto& clips = state.tracks[(size_t) track].audioClips;
+
+    if (! juce::isPositiveAndBelow (clipIndex, (int) clips.size()))
+        return {};
+
+    const auto& clip = clips[(size_t) clipIndex];
+    const auto numSteps = juce::jmax (1, state.patternLengthSteps);
+    const auto gridWidth = (float) juce::jmax (1, getWidth() - headerWidth);
+    const auto stepWidth = gridWidth / (float) numSteps;
+
+    return { (float) headerWidth + (float) clip.startStep * stepWidth,
+             (float) rulerHeight + (float) track * (float) rowHeight,
+             (float) clip.lengthSteps * stepWidth,
+             (float) rowHeight };
+}
+
+SequencerGrid::ClipHit SequencerGrid::hitTestAudioClip (juce::Point<int> position) const
+{
+    ClipHit hit;
+    const auto& state = document.getState();
+
+    for (int track = 0; track < (int) state.tracks.size(); ++track)
+    {
+        if (state.tracks[(size_t) track].type != TrackType::audio)
+            continue;
+
+        for (int clip = 0; clip < (int) state.tracks[(size_t) track].audioClips.size(); ++clip)
+        {
+            if (getAudioClipBounds (track, clip).contains (position.toFloat()))
+            {
+                hit.track = track;
+                hit.clip = clip;
+                return hit;
+            }
+        }
+    }
+
+    return hit;
+}
+
+bool SequencerGrid::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& path : files)
+    {
+        const juce::File file (path);
+
+        if (file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;m4a"))
+            return true;
+    }
+
+    return false;
+}
+
+void SequencerGrid::fileDragEnter (const juce::StringArray& files, int x, int y)
+{
+    if (! isInterestedInFileDrag (files))
+        return;
+
+    if (y >= rulerHeight)
+    {
+        const auto track = (y - rulerHeight) / juce::jmax (1, rowHeight);
+        pendingDropTrack = juce::isPositiveAndBelow (track, (int) document.getState().tracks.size()) ? track : -1;
+    }
+
+    repaint();
+}
+
+void SequencerGrid::fileDragExit (const juce::StringArray&)
+{
+    pendingDropTrack = -1;
+    repaint();
+}
+
+void SequencerGrid::filesDropped (const juce::StringArray& files, int x, int y)
+{
+    pendingDropTrack = -1;
+
+    if (files.isEmpty() || y < rulerHeight)
+    {
+        repaint();
+        return;
+    }
+
+    const auto track = (y - rulerHeight) / juce::jmax (1, rowHeight);
+
+    if (! juce::isPositiveAndBelow (track, (int) document.getState().tracks.size()))
+    {
+        repaint();
+        return;
+    }
+
+    if (onAudioFileDropped)
+    {
+        const auto& droppedPath = files[0];
+
+        onAudioFileDropped (juce::File::isAbsolutePath (droppedPath)
+                                ? juce::File (droppedPath)
+                                : juce::File::getCurrentWorkingDirectory().getChildFile (droppedPath),
+                            track);
+    }
+
+    repaint();
+}
+
+void SequencerGrid::mouseMove (const juce::MouseEvent& e)
+{
+    const auto hit = hitTestAudioClip (e.getPosition());
+
+    if (hit.track != hoveredAudioTrack || hit.clip != hoveredAudioClip)
+    {
+        hoveredAudioTrack = hit.track;
+        hoveredAudioClip = hit.clip;
+        setMouseCursor (hit.track >= 0 ? juce::MouseCursor::DraggingHandCursor
+                                       : juce::MouseCursor::PointingHandCursor);
+        repaint();
+    }
+}
+
+void SequencerGrid::mouseExit (const juce::MouseEvent&)
+{
+    if (hoveredAudioTrack >= 0 || hoveredAudioClip >= 0)
+    {
+        hoveredAudioTrack = -1;
+        hoveredAudioClip = -1;
+        repaint();
+    }
+}
+
 void SequencerGrid::mouseDown (const juce::MouseEvent& e)
 {
+    // Audio clips take priority: clicking one selects the track and offers its menu.
+    const auto audioHit = hitTestAudioClip (e.getPosition());
+
+    if (audioHit.track >= 0)
+    {
+        selectedTrack = audioHit.track;
+
+        if (onTrackSelected)
+            onTrackSelected (selectedTrack);
+
+        if (e.mods.isRightButtonDown())
+        {
+            if (onAudioClipMenu)
+                onAudioClipMenu (audioHit.track, audioHit.clip);
+        }
+        else if (onAudioClipClicked)
+        {
+            onAudioClipClicked (audioHit.track, audioHit.clip);
+        }
+
+        repaint();
+        return;
+    }
+
     int track = 0, step = 0;
 
     if (! hitTestCell (e.getPosition(), track, step))
@@ -359,6 +588,81 @@ TimelineView::TimelineView (ProjectDocument& d, AudioEngine& e)
             onPreviewNote();
     };
 
+    grid.onAudioFileDropped = [this] (const juce::File& file, int track)
+    {
+        if (onAudioFileDropped)
+            onAudioFileDropped (file, track);
+    };
+
+    grid.onAudioClipClicked = [this] (int track, int clip)
+    {
+        setSelectedTrack (track);
+
+        // Clicking a clip auditions the track by refreshing the engine snapshots.
+        engine.reloadAudioClips();
+
+        if (onProjectEdited)
+            onProjectEdited();
+    };
+
+    grid.onAudioClipMenu = [this] (int track, int clip)
+    {
+        auto& state = document.getState();
+
+        if (! juce::isPositiveAndBelow (track, (int) state.tracks.size()))
+            return;
+
+        auto& clips = state.tracks[(size_t) track].audioClips;
+
+        if (! juce::isPositiveAndBelow (clip, (int) clips.size()))
+            return;
+
+        juce::PopupMenu menu;
+        menu.addSectionHeader (clips[(size_t) clip].name);
+        menu.addItem (1, "Duplicate clip");
+        menu.addItem (2, "Move to bar 1");
+        menu.addSeparator();
+        menu.addItem (3, "Remove clip");
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&grid),
+                            [this, track, clip] (int result)
+        {
+            auto& st = document.getState();
+
+            if (result == 0 || ! juce::isPositiveAndBelow (track, (int) st.tracks.size()))
+                return;
+
+            auto& list = st.tracks[(size_t) track].audioClips;
+
+            if (! juce::isPositiveAndBelow (clip, (int) list.size()))
+                return;
+
+            if (result == 1)
+            {
+                auto copy = list[(size_t) clip];
+                copy.name += " copy";
+                copy.startStep = juce::jmin (copy.startStep + copy.lengthSteps,
+                                             juce::jmax (0, st.patternLengthSteps - 1));
+                list.insert (list.begin() + clip + 1, copy);
+            }
+            else if (result == 2)
+            {
+                list[(size_t) clip].startStep = 0;
+            }
+            else if (result == 3)
+            {
+                list.erase (list.begin() + clip);
+            }
+
+            engine.reloadAudioClips();
+            document.markDirty();
+            grid.repaint();
+
+            if (onProjectEdited)
+                onProjectEdited();
+        });
+    };
+
     startTimerHz (30);
     rebuild();
 }
@@ -377,6 +681,12 @@ void TimelineView::timerCallback()
             meters[i]->setLevel (engine.getTrackPeak ((int) i, 0), engine.getTrackPeak ((int) i, 1));
 
     masterMeter.setLevel (engine.getMasterPeak (0), engine.getMasterPeak (1));
+}
+
+void TimelineView::refreshAudioClips()
+{
+    engine.reloadAudioClips();
+    grid.repaint();
 }
 
 void TimelineView::setSelectedTrack (int index)
@@ -655,6 +965,8 @@ void TimelineView::showTrackMenu (int trackIndex)
                          document.getState().tracks[(size_t) trackIndex].busIndex == i);
 
     menu.addSubMenu ("Output bus", busMenu);
+    menu.addItem (4, "Import audio file...");
+    menu.addSeparator();
     menu.addItem (1, "Rename track...");
     menu.addItem (2, "Duplicate track");
     menu.addItem (3, "Delete track");
@@ -709,6 +1021,26 @@ void TimelineView::showTrackMenu (int trackIndex)
         {
             if (tracks.size() > 1)
                 tracks.erase (tracks.begin() + trackIndex);
+        }
+        else if (result == 4)
+        {
+            auto chooser = std::make_shared<juce::FileChooser> (
+                "Import an audio file",
+                juce::File::getSpecialLocation (juce::File::userMusicDirectory),
+                "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3;*.m4a");
+
+            chooser->launchAsync (juce::FileBrowserComponent::openMode
+                                    | juce::FileBrowserComponent::canSelectFiles,
+                                  [this, chooser, trackIndex] (const juce::FileChooser& fc)
+            {
+                const auto file = fc.getResult();
+
+                if (file == juce::File())
+                    return;
+
+                if (onAudioFileDropped)
+                    onAudioFileDropped (file, trackIndex);
+            });
         }
 
         engine.rebuildGraph();

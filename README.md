@@ -5,10 +5,10 @@ A digital audio workstation for Windows, written in C++20 with
 
 ![NUX - Main workspace](docs/screenshots/main.png)
 
-> **Status: 0.3.0 foundation.** NUX plays, sequences, mixes, hosts plugin editors,
-> saves projects and exports WAV. It is **not** a finished DAW yet - audio clip
-> playback, plugin audio in the signal chain, undo/redo and automation are still
-> missing. `TODO-LIST.md` tracks the honest state of every feature.
+> **Status: 0.4.0 in progress.** NUX plays, sequences, mixes, plays back audio
+> clips, hosts plugin editors, saves projects and exports WAV. It is **not** a
+> finished DAW yet: plugin audio is not in the signal chain, and there is no
+> undo/redo or automation. `TODO-LIST.md` tracks the honest state of every feature.
 
 ---
 
@@ -25,7 +25,8 @@ A digital audio workstation for Windows, written in C++20 with
 | Piano roll note editing | ✅ |
 | VST3 scanning and plugin editor windows | ✅ (audio routing still pending) |
 | `.nux` project save / load, 24-bit WAV export | ✅ |
-| Undo / redo, automation, audio clip playback | ❌ not yet |
+| **Audio clip playback, import and drag-and-drop** | ✅ |
+| Undo / redo, automation | ❌ not yet |
 
 Screenshots of every workspace live in [`docs/screenshots/`](docs/screenshots).
 
@@ -91,7 +92,8 @@ ctest --test-dir build --output-on-failure
 | Switch workspace | `Alt+1` … `Alt+5` |
 
 - **Main** – click a grid cell to toggle a step, drag to paint. Right-click a
-  track header for its instrument, output bus and name.
+  track header for its instrument, output bus, name and **Import audio file...**.
+  You can also drag a WAV/AIFF/FLAC/Ogg/MP3 file straight onto a track lane.
 - **Mixer** – faders, pan, mute/solo, insert slots and the two send effects per bus.
 - **Piano Roll** – click to add a note, drag to move, right-click to delete,
   `Shift`-drag to change pitch.

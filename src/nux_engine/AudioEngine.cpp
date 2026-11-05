@@ -152,7 +152,9 @@ void AudioEngine::rebuildGraph()
         if (graphPrepared)
         {
             track.buffer.setSize (2, blockSize, false, true, true);
+            track.clipBuffer.setSize (2, blockSize, false, true, true);
             track.strip.prepare (sampleRate, blockSize, 2);
+            track.clipPlayer.prepare (sampleRate, blockSize);
         }
     }
 
@@ -278,6 +280,148 @@ void AudioEngine::syncSequencerFromState()
     writeSequenceSet = 1 - writeSequenceSet;
 }
 
+//==============================================================================
+// Audio clips
+//==============================================================================
+void AudioEngine::setMediaRootDirectory (const juce::File& projectFolder)
+{
+    mediaRoot = projectFolder;
+}
+
+juce::File AudioEngine::getMediaRootDirectory() const
+{
+    return mediaRoot;
+}
+
+juce::File AudioEngine::resolveClipFile (const juce::String& clipPath) const
+{
+    if (clipPath.isEmpty())
+        return {};
+
+    if (juce::File::isAbsolutePath (clipPath))
+        return juce::File (clipPath);   // absolute paths are used as-is
+
+    const auto root = mediaRoot == juce::File()
+                        ? juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                              .getChildFile ("NUX Projects")
+                        : mediaRoot;
+
+    // Clip paths are stored relative to the project folder, e.g. "media/kick.wav".
+    // File objects must not be built from a relative string, hence getChildFile.
+    return root.getChildFile (clipPath);
+}
+
+void AudioEngine::reloadAudioClips()
+{
+    if (projectState == nullptr)
+        return;
+
+    const auto count = juce::jmin (trackCount, (int) projectState->tracks.size());
+
+    for (int i = 0; i < constants::maxTracks; ++i)
+        clipSnapshots[(size_t) i].clear();
+
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& track = projectState->tracks[(size_t) i];
+
+        for (const auto& clip : track.audioClips)
+        {
+            const auto file = resolveClipFile (clip.sourceFile);
+
+            if (! file.existsAsFile())
+                continue;
+
+            juce::String error;
+            auto buffer = clipStore.load (file, error);
+
+            if (buffer == nullptr)
+                continue;
+
+            ClipSnapshot snapshot;
+            snapshot.buffer = std::move (buffer);
+            snapshot.startStep = clip.startStep;
+            snapshot.lengthSteps = clip.lengthSteps;
+            snapshot.sourceStartSample = clip.sourceStartSample;
+            snapshot.gain = 1.0f;
+
+            clipSnapshots[(size_t) i].push_back (std::move (snapshot));
+        }
+    }
+
+    for (int i = 0; i < constants::maxTracks; ++i)
+        tracks[(size_t) i].clipPlayer.setClips (clipSnapshots[(size_t) i]);
+}
+
+double AudioEngine::getClipLengthSeconds (const juce::String& clipPath) const
+{
+    const auto file = resolveClipFile (clipPath);
+
+    if (auto buffer = clipStore.find (file.getFullPathName()))
+        return buffer->getLengthSeconds();
+
+    juce::String error;
+
+    if (auto loaded = const_cast<AudioClipStore&> (clipStore).load (file, error))
+        return loaded->getLengthSeconds();
+
+    return 0.0;
+}
+
+juce::String AudioEngine::importAudioFile (const juce::File& sourceFile, juce::String& error)
+{
+    error.clear();
+
+    if (! sourceFile.existsAsFile())
+    {
+        error = "The file does not exist: " + sourceFile.getFullPathName();
+        return {};
+    }
+
+    juce::String loadError;
+
+    if (clipStore.load (sourceFile, loadError) == nullptr)
+    {
+        error = loadError;
+        return {};
+    }
+
+    const auto mediaFolder = (mediaRoot == juce::File()
+                                  ? juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                                        .getChildFile ("NUX Projects")
+                                  : mediaRoot)
+                                .getChildFile ("media");
+
+    if (! mediaFolder.isDirectory() && ! mediaFolder.createDirectory().wasOk())
+    {
+        error = "Could not create the media folder: " + mediaFolder.getFullPathName();
+        return {};
+    }
+
+    auto target = mediaFolder.getChildFile (sourceFile.getFileName());
+
+    // Never overwrite media that is already in the project.
+    int suffix = 1;
+
+    while (target.existsAsFile() && target.getSize() != sourceFile.getSize())
+    {
+        target = mediaFolder.getChildFile (sourceFile.getFileNameWithoutExtension()
+                                            + "_" + juce::String (++suffix)
+                                            + sourceFile.getFileExtension());
+    }
+
+    if (! target.existsAsFile())
+    {
+        if (! sourceFile.copyFileTo (target))
+        {
+            error = "Could not copy the file into the project media folder.";
+            return {};
+        }
+    }
+
+    return "media/" + target.getFileName();
+}
+
 void AudioEngine::applyBusSendLevels()
 {
     for (int i = 0; i < constants::numMixerBuses; ++i)
@@ -303,7 +447,9 @@ void AudioEngine::prepare (double newSampleRate, int newBlockSize)
     {
         auto& track = tracks[(size_t) i];
         track.buffer.setSize (2, blockSize, false, true, true);
+        track.clipBuffer.setSize (2, blockSize, false, true, true);
         track.strip.prepare (sampleRate, blockSize, 2);
+        track.clipPlayer.prepare (sampleRate, blockSize);
         track.synth.setCurrentPlaybackSampleRate (sampleRate);
         sequencerMidi[(size_t) i].ensureSize (256);
         previewMidi[(size_t) i].ensureSize (256);
@@ -330,6 +476,11 @@ void AudioEngine::prepareForOfflineRendering (double newSampleRate, int newBlock
     juce::ignoreUnused (numChannels);
     audioReady = false;
     prepare (newSampleRate, newBlockSize);
+}
+
+void AudioEngine::renderBlockForTest (juce::AudioBuffer<float>& output, int numSamples)
+{
+    renderBlock (output, numSamples);
 }
 
 void AudioEngine::runBlocksForTest (int numBlocks)
@@ -552,6 +703,22 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
         auto& buffer = track.buffer;
 
         buffer.clear (0, numSamples);
+
+        // Audio clips are mixed in first; the synth adds on top.
+        if (! clipSnapshots[(size_t) i].empty())
+        {
+            auto& clipBuf = track.clipBuffer;
+            clipBuf.clear (0, numSamples);
+
+            track.clipPlayer.render (clipBuf, numSamples,
+                                     transport.getPositionSteps(),
+                                     transport.stepsPerSample (sampleRate),
+                                     transport.getLoopLengthSteps(),
+                                     transport.isLoopEnabled() && transport.isPlaying());
+
+            for (int ch = 0; ch < juce::jmin (2, clipBuf.getNumChannels()); ++ch)
+                buffer.addFrom (ch, 0, clipBuf, ch, 0, numSamples);
+        }
 
         auto& midi = sequencerMidi[(size_t) i];
         midi.swapWith (previewMidi[(size_t) i]);
@@ -810,8 +977,10 @@ bool AudioEngine::exportToWav (const ExportOptions& options, juce::String& error
     // Pause the live transport, render from step 0, then restore it.
     const auto wasPlaying = transport.isPlaying();
     const auto previousPosition = transport.getPositionSteps();
+    const auto previousLooping = transport.isLoopEnabled();
 
     transport.setPlaying (false);
+    transport.setLoopEnabled (false);   // render straight through, no repeats in the tail
     panic();
     renderingOffline.store (true);
 
@@ -858,6 +1027,7 @@ bool AudioEngine::exportToWav (const ExportOptions& options, juce::String& error
     transport.setPlaying (false);
     panic();
     transport.setPositionSteps (0.0);
+    transport.setLoopEnabled (previousLooping);
     renderingOffline.store (false);
 
     if (success)

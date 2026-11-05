@@ -21,6 +21,8 @@
 #include <memory>
 
 #include "../nux_core/TrackModel.h"
+#include "AudioClipPlayer.h"
+#include "AudioClipStore.h"
 #include "ChannelStrip.h"
 #include "Synth.h"
 #include "Transport.h"
@@ -32,7 +34,9 @@ struct TrackEngine
 {
     juce::Synthesiser synth;
     ChannelStrip strip;
+    AudioClipPlayer clipPlayer;
     juce::AudioBuffer<float> buffer;
+    juce::AudioBuffer<float> clipBuffer;
 };
 
 class AudioEngine final : public juce::AudioIODeviceCallback,
@@ -71,6 +75,27 @@ public:
 
     /** Re-reads pattern data (steps) into the sequencer snapshot. */
     void syncSequencerFromState();
+
+    //==============================================================================
+    // Audio clips
+
+    /** Folder that relative clip paths are resolved against (the project folder). */
+    void setMediaRootDirectory (const juce::File& projectFolder);
+    juce::File getMediaRootDirectory() const;
+    juce::File resolveClipFile (const juce::String& clipPath) const;
+
+    /** Decodes every clip used by the current project and rebuilds the clip snapshots.
+        Call on the message thread after loading a project or importing audio. */
+    void reloadAudioClips();
+
+    /** Copies an audio file into the project's media folder, loads it and returns the
+        path to store in the project. Empty on failure. */
+    juce::String importAudioFile (const juce::File& sourceFile, juce::String& error);
+
+    /** Number of clip files currently decoded. */
+    int getNumLoadedClipFiles() const noexcept { return clipStore.getNumLoaded(); }
+    double getClipLengthSeconds (const juce::String& clipPath) const;
+    juce::int64 getClipMemoryUsageBytes() const noexcept { return clipStore.getMemoryUsageBytes(); }
 
     //==============================================================================
     float getTrackPeak (int trackIndex, int channel) const;
@@ -127,6 +152,9 @@ public:
     /** Renders `numBlocks` blocks through the graph, discarding the output. */
     void runBlocksForTest (int numBlocks);
 
+    /** Renders one block into `output` through the full graph. For diagnostics/tests. */
+    void renderBlockForTest (juce::AudioBuffer<float>& output, int numSamples);
+
     //==============================================================================
     void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
                                            int numInputChannels,
@@ -172,6 +200,10 @@ private:
     std::array<std::array<bool, 128>, constants::maxTracks> noteHeld {};
 
     SynthParameters synthParameters;
+
+    AudioClipStore clipStore;
+    juce::File mediaRoot;
+    std::array<std::vector<ClipSnapshot>, constants::maxTracks> clipSnapshots;
 
     double sampleRate = 44100.0;
     int blockSize = 512;
