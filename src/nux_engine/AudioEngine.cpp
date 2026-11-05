@@ -40,7 +40,10 @@ juce::String AudioEngine::initialiseAudio()
     deviceManager.addAudioCallback (this);
     deviceManager.addMidiInputDeviceCallback ({}, this);
 
-    lastDeviceError = deviceManager.initialise (0, 2, nullptr, true);
+    // Two input channels are requested so a microphone or interface can be recorded;
+    // a device that has no inputs simply reports zero available channels instead of
+    // failing to open.
+    lastDeviceError = deviceManager.initialise (2, 2, nullptr, true);
     audioReady = deviceManager.getCurrentAudioDevice() != nullptr;
 
     if (! audioReady && lastDeviceError.isEmpty())
@@ -465,6 +468,7 @@ void AudioEngine::prepare (double newSampleRate, int newBlockSize)
 
     masterBus.prepareMaster (sampleRate, blockSize);
     preparePluginsForGraph();
+    inputRecorder.prepare (sampleRate, blockSize, 2);
     recordScratch.setSize (2, blockSize, false, true, true);
 
     scopeDecimation = juce::jmax (1, (int) std::round (sampleRate / 22050.0));
@@ -512,12 +516,17 @@ void AudioEngine::audioDeviceStopped()
     graphPrepared = false;
 }
 
-void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*, int,
+void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                                   int numInputChannels,
                                                    float* const* outputChannelData,
                                                    int numOutputChannels,
                                                    int numSamples,
                                                    const juce::AudioIODeviceCallbackContext&)
 {
+    // The recorded signal is the *input*, not the mixdown: capturing the output
+    // would make every take a copy of what the speakers were already playing.
+    inputRecorder.pushInput (inputChannelData, numInputChannels, numSamples);
+
     if (numOutputChannels <= 0 || numSamples <= 0 || outputChannelData == nullptr)
         return;
 
@@ -690,7 +699,10 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
     }();
 
     for (auto& midi : sequencerMidi) midi.clear();
-    for (auto& midi : previewMidi)   midi.clear();
+
+    // previewMidi is deliberately *not* cleared here. It holds the notes the UI and
+    // the MIDI input queued since the previous block, and clearing it at the top of
+    // the block threw them away before they were ever played. It is consumed below.
 
     runSequencer (numSamples);
     processNoteReleases (numSamples);
@@ -704,6 +716,10 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
     {
         auto& track = tracks[(size_t) i];
         auto& buffer = track.buffer;
+
+        // The strip must be told the block length before it processes anything;
+        // without this every track's inserts, fader, pan, mute and meters are skipped.
+        track.strip.beginBlock (numSamples);
 
         buffer.clear (0, numSamples);
 
@@ -724,8 +740,16 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
         }
 
         auto& midi = sequencerMidi[(size_t) i];
-        midi.swapWith (previewMidi[(size_t) i]);
-        midi.addEvents (previewMidi[(size_t) i], 0, -1, 0);
+
+        {
+            // Hand the queued preview notes over, then clear the queue for the next
+            // block. The lock is only ever held for a handful of events; it stops the
+            // UI thread and the MIDI thread from writing into the buffer we are using.
+            const juce::SpinLock::ScopedLockType lock (previewMidiLock);
+            midi.swapWith (previewMidi[(size_t) i]);
+            midi.addEvents (previewMidi[(size_t) i], 0, -1, 0);
+            previewMidi[(size_t) i].clear();
+        }
 
         if (track.strip.hasInstrumentPlugin())
         {
@@ -843,9 +867,12 @@ void AudioEngine::triggerPreviewNote (int trackIndex, int midiNote, float veloci
     if (! juce::isPositiveAndBelow (trackIndex, trackCount))
         return;
 
-    // Preview notes are queued for the next block; the audio callback owns them.
-    previewMidi[(size_t) trackIndex].addEvent (
-        juce::MidiMessage::noteOn (1, midiNote, juce::jlimit (0.05f, 1.0f, velocity)), 0);
+    // Preview notes are queued for the next block; the audio callback consumes them.
+    {
+        const juce::SpinLock::ScopedLockType lock (previewMidiLock);
+        previewMidi[(size_t) trackIndex].addEvent (
+            juce::MidiMessage::noteOn (1, midiNote, juce::jlimit (0.05f, 1.0f, velocity)), 0);
+    }
 
     const auto beats = 60.0 / juce::jmax (1.0, transport.getTempo());
     noteReleaseCountdown[(size_t) trackIndex][(size_t) juce::jlimit (0, 127, midiNote)] =
@@ -1083,7 +1110,7 @@ void AudioEngine::restartDeviceAfterGraphEdit()
 {
     if (audioReady)
     {
-        deviceManager.initialise (0, 2, nullptr, true);
+        deviceManager.initialise (2, 2, nullptr, true);
         deviceManager.addAudioCallback (this);
         audioReady = deviceManager.getCurrentAudioDevice() != nullptr;
     }
@@ -1426,5 +1453,78 @@ void AudioEngine::capturePluginStates()
 
     for (int s = 0; s < constants::maxTrackInserts; ++s)
         captureSlot (projectState->master.inserts[(size_t) s], masterBus.getPluginSlot (s));
+}
+
+//==============================================================================
+// Audio input recording
+//==============================================================================
+int AudioEngine::getArmedTrack() const
+{
+    const auto armed = armedTrackIndex.load (std::memory_order_relaxed);
+
+    if (juce::isPositiveAndBelow (armed, trackCount))
+        return armed;
+
+    return -1;
+}
+
+bool AudioEngine::hasAudioInput() const
+{
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+        return device->getActiveInputChannels().countNumberOfSetBits() > 0;
+
+    return false;
+}
+
+juce::String AudioEngine::startInputRecording (const juce::File& mediaFolder)
+{
+    if (inputRecorder.isRecording())
+        return "Already recording.";
+
+    if (! hasAudioInput())
+        return "The audio device has no input channels. Pick an input in the AUDIO settings first.";
+
+    const auto track = getArmedTrack();
+
+    if (track < 0)
+        return "Arm a track for recording first (the R button on the track header).";
+
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
+    const auto file = mediaFolder.getChildFile ("take-" + stamp + ".wav");
+
+    juce::String error;
+
+    if (! inputRecorder.start (file, transport.getPositionSteps(), error))
+        return error;
+
+    transport.setRecording (true);
+    transport.setPlaying (true);
+
+    return {};
+}
+
+AudioEngine::RecordedTake AudioEngine::stopInputRecording()
+{
+    RecordedTake take;
+
+    if (! inputRecorder.isRecording())
+        return take;
+
+    take.file = inputRecorder.getRecordingFile();
+    take.startStep = inputRecorder.getStartPositionSteps();
+    take.lengthSeconds = inputRecorder.getRecordedSeconds();
+    take.trackIndex = getArmedTrack();
+
+    inputRecorder.stop();
+    transport.setRecording (false);
+
+    // A take shorter than a few milliseconds is a mistake, not a recording.
+    if (take.lengthSeconds < 0.05)
+    {
+        take.file.deleteFile();
+        take = RecordedTake {};
+    }
+
+    return take;
 }
 }

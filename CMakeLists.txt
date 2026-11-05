@@ -61,6 +61,7 @@ target_sources(NUX PRIVATE
     src/nux_ui/Theme.cpp
     src/nux_engine/AudioClipPlayer.cpp
     src/nux_engine/AudioClipStore.cpp
+    src/nux_engine/InputRecorder.cpp
     src/nux_engine/AudioEngine.cpp
     src/nux_engine/ChannelStrip.cpp
     src/nux_engine/Synth.cpp

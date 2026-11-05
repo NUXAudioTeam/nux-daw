@@ -10,6 +10,7 @@ target_sources(NUXTests PRIVATE
     PluginHostTests.cpp
     InsertParameterTests.cpp
     UndoTests.cpp
+    RecordingTests.cpp
     ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/InsertParameters.cpp
@@ -17,6 +18,7 @@ target_sources(NUXTests PRIVATE
     ../src/nux_core/TrackModel.cpp
     ../src/nux_engine/AudioClipPlayer.cpp
     ../src/nux_engine/AudioClipStore.cpp
+    ../src/nux_engine/InputRecorder.cpp
     ../src/nux_engine/AudioEngine.cpp
     ../src/nux_engine/ChannelStrip.cpp
     ../src/nux_engine/PluginManager.cpp

@@ -73,6 +73,16 @@ public:
     /** Headless self-test of the undo system through the real UI commands: makes an
         edit, undoes it, redoes it, and reports what happened at each step. */
     juce::String runUndoSelfTest();
+
+    /** Headless self-test of recording: places a take on an armed track through the
+        same code path the record button uses, and reports the result. */
+    juce::String runRecordingSelfTest (const juce::File& takeFile, double lengthSeconds, int trackIndex);
+
+    /** Headless self-test of hosted-instrument selection: writes a plugin reference into
+        a track the same way the track menu does, loads it, plays a note through it and
+        checks that the plugin really produced audio. */
+    juce::String runInstrumentSelfTest (const juce::File& pluginFolder, const juce::String& pluginName,
+                                        int trackIndex);
     void toggleAudioSettings();
     void showAbout();
 
@@ -91,6 +101,13 @@ public:
 private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
+    void chooseInstrumentPlugin (int trackIndex);
+    void useBuiltInInstrument (int trackIndex);
+
+    void toggleRecording();
+    void placeRecordedTake (const AudioEngine::RecordedTake& take);
+    static bool fileIsInsideFolder (const juce::File& file, const juce::File& folder);
 
     void performUndo();
     void performRedo();

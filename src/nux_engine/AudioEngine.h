@@ -23,6 +23,7 @@
 #include "../nux_core/TrackModel.h"
 #include "AudioClipPlayer.h"
 #include "AudioClipStore.h"
+#include "InputRecorder.h"
 #include "ChannelStrip.h"
 #include "PluginManager.h"
 #include "PluginSlot.h"
@@ -164,6 +165,38 @@ public:
     void triggerPreviewNote (int trackIndex, int midiNote, float velocity);
 
     //==============================================================================
+    // Audio input recording
+
+    /** The track whose armed state decides where the take lands (-1 when none). */
+    int getArmedTrack() const;
+
+    /** Starts capturing the audio input into a WAV file inside the project's media
+        folder. `mediaFolder` must exist. Returns an empty string on success. */
+    juce::String startInputRecording (const juce::File& mediaFolder);
+
+    /** Stops capturing and returns the finished take. Empty name when nothing was
+        recorded. The file is left on disk for the caller to place on a track. */
+    struct RecordedTake
+    {
+        juce::File file;
+        double startStep = 0.0;
+        double lengthSeconds = 0.0;
+        int trackIndex = -1;
+    };
+
+    RecordedTake stopInputRecording();
+
+    bool isInputRecording() const noexcept { return inputRecorder.isRecording(); }
+    float getInputLevel() const noexcept { return inputRecorder.getInputLevel(); }
+    double getRecordingSeconds() const noexcept { return inputRecorder.getRecordedSeconds(); }
+
+    /** Flushes captured audio to disk; call from a timer while recording. */
+    void pumpInputRecorder() { inputRecorder.drainToFile(); }
+
+    /** True when the device actually has input channels available. */
+    bool hasAudioInput() const;
+
+    //==============================================================================
     void play();
     void stop();
     void togglePlay();
@@ -243,6 +276,9 @@ private:
     std::array<std::atomic<float>, constants::numMixerBuses> busReverbSends {};
 
     /** MIDI destined for each track during the current block. */
+    /** Guards previewMidi: the UI/MIDI threads produce, the audio thread consumes. */
+    juce::SpinLock previewMidiLock;
+
     std::array<juce::MidiBuffer, constants::maxTracks> sequencerMidi;
     std::array<juce::MidiBuffer, constants::maxTracks> previewMidi;
 
@@ -255,6 +291,8 @@ private:
     PluginManager* pluginManager = nullptr;
 
     AudioClipStore clipStore;
+    InputRecorder inputRecorder;
+    std::atomic<int> armedTrackIndex { -1 };
     juce::File mediaRoot;
     std::array<std::vector<ClipSnapshot>, constants::maxTracks> clipSnapshots;
 

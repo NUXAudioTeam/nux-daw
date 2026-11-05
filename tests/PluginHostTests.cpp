@@ -313,6 +313,79 @@ public:
             expect (output.getNumSamples() == 512);
         }
 
+        beginTest ("A hosted instrument plays the notes sent to its track");
+        {
+            AudioEngine engine;
+            ProjectState project = ProjectState::createDefault();
+            engine.setProjectState (&project);
+            engine.setPluginManager (&manager);
+            engine.prepareForOfflineRendering (44100.0, 512, 2);
+
+            // Describe the instrument exactly the way the track menu does: a plugin
+            // reference written into the model, then loaded by the engine.
+            const PluginManager::PluginInfo* tone = nullptr;
+
+            for (const auto& info : manager.getPlugins())
+                if (info.isInstrument && info.name.containsIgnoreCase ("Test Tone"))
+                    tone = &info;
+
+            expect (tone != nullptr, "The test instrument is not available");
+
+            if (tone == nullptr)
+                return;
+
+            PluginReference reference;
+            reference.name         = tone->name;
+            reference.manufacturer = tone->manufacturer;
+            reference.format       = tone->format;
+            reference.isInstrument = true;
+
+            if (auto xml = tone->description.createXml())
+                reference.descriptionXml = xml->toString (juce::XmlElement::TextFormat().singleLine());
+
+            project.tracks[1].type = TrackType::sampler;
+            project.tracks[1].instrumentPlugin = reference;
+
+            const auto error = engine.loadTrackInstrument (1);
+            expect (error.isEmpty(), "Loading the instrument failed: " + error);
+            expect (engine.getTrackInstrumentSlot (1) != nullptr,
+                    "The track should own a plugin slot after loading an instrument");
+
+            auto renderPeak = [&engine] (double seconds)
+            {
+                juce::AudioBuffer<float> output (2, 512);
+                auto peak = 0.0f;
+                const auto blocks = juce::jmax (1, (int) (seconds * 44100.0 / 512.0));
+
+                for (int i = 0; i < blocks; ++i)
+                {
+                    output.clear();
+                    engine.renderBlockForTest (output, 512);
+                    peak = juce::jmax (peak, output.getMagnitude (0, 512));
+                }
+
+                return peak;
+            };
+
+            // Nothing is playing, so the track must be silent.
+            expect (renderPeak (0.05) < 0.01f, "A hosted instrument must be silent before any note");
+
+            engine.triggerPreviewNote (1, 60, 0.9f);
+
+            // The instrument generates a tone from the note, so audio must appear.
+            const auto notePeak = renderPeak (0.1);
+            expect (notePeak > 0.01f,
+                    "A note sent to a hosted instrument produced no audio (master peak "
+                      + juce::String (notePeak, 4)
+                      + ", track peak " + juce::String (engine.getTrackPeak (1, 0), 4)
+                      + ", slot present " + juce::String (engine.getTrackInstrumentSlot (1) != nullptr ? 1 : 0) + ")");
+
+            // Removing the instrument must take it out of the graph.
+            engine.unloadTrackInstrument (1);
+            expect (engine.getTrackInstrumentSlot (1) == nullptr,
+                    "The instrument slot should be empty after unloading");
+        }
+
         beginTest ("Plugin instances are retired without blocking the audio thread");
         {
             const auto before = PluginRetirementQueue::getInstance().getPendingCount();

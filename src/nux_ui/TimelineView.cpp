@@ -983,6 +983,11 @@ void TimelineView::showTrackMenu (int trackIndex)
                          document.getState().tracks[(size_t) trackIndex].busIndex == i);
 
     menu.addSubMenu ("Output bus", busMenu);
+    menu.addSeparator();
+    menu.addItem (5, "Load instrument plugin...");
+    menu.addItem (6, "Use the built-in sampler",
+                  document.getState().tracks[(size_t) trackIndex].instrumentPlugin.isValid());
+    menu.addSeparator();
     menu.addItem (4, "Import audio file...");
     menu.addSeparator();
     menu.addItem (1, "Rename track...");
@@ -1004,6 +1009,21 @@ void TimelineView::showTrackMenu (int trackIndex)
         else if (result >= 200 && result < 200 + constants::numMixerBuses)
         {
             tracks[(size_t) trackIndex].busIndex = result - 200;
+        }
+        else if (result == 5)
+        {
+            // Pick a hosted instrument for this track. The reference is written into
+            // the model first and the engine instantiates it from there, so the
+            // project is always the source of truth (and undo works for free).
+            if (onInstrumentPluginRequested)
+                onInstrumentPluginRequested (trackIndex);
+            return;
+        }
+        else if (result == 6)
+        {
+            if (onClearInstrumentPlugin)
+                onClearInstrumentPlugin (trackIndex);
+            return;
         }
         else if (result == 1)
         {

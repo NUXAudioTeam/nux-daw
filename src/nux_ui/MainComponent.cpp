@@ -193,6 +193,9 @@ MainComponent::MainComponent()
         setWorkspace ((Workspace) juce::jlimit (0, 4, index));
     };
 
+    transportBar.onRecordToggled = [this] { toggleRecording(); };
+    timelineView.onInstrumentPluginRequested = [this] (int track) { chooseInstrumentPlugin (track); };
+    timelineView.onClearInstrumentPlugin = [this] (int track) { useBuiltInInstrument (track); };
     transportBar.onSaveRequested = [this] { saveProject (false); };
     transportBar.onAudioSettingsRequested = [this] { toggleAudioSettings(); };
     transportBar.onTempoChanged = [this]
@@ -274,6 +277,16 @@ MainComponent::~MainComponent()
 //==============================================================================
 void MainComponent::timerCallback()
 {
+    // While recording, move captured audio into the WAV file and show progress.
+    if (engine.isInputRecording())
+    {
+        engine.pumpInputRecorder();
+
+        if (currentWorkspace != Workspace::master)
+            showStatus ("Recording  " + juce::String (engine.getRecordingSeconds(), 1) + " s"
+                        + (engine.getInputLevel() < 0.0005f ? "   (input is silent)" : ""));
+    }
+
     // Only touch the master panel while it is actually visible; refreshing meters on a
     // hidden component would queue repaints for a component that cannot be drawn.
     if (currentWorkspace == Workspace::master && masterPanel != nullptr && masterPanel->isVisible())
@@ -547,6 +560,345 @@ bool MainComponent::perform (const InvocationInfo& info)
         case cmdAbout:              showAbout(); return true;
         default: return false;
     }
+}
+
+//==============================================================================
+juce::String MainComponent::runInstrumentSelfTest (const juce::File& pluginFolder,
+                                                  const juce::String& pluginName,
+                                                  int trackIndex)
+{
+    juce::StringArray report;
+    auto& state = document.getState();
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
+        return "Track " + juce::String (trackIndex) + " does not exist";
+
+    pluginManager.addSearchPaths (juce::FileSearchPath (pluginFolder.getFullPathName()));
+    pluginManager.scanNow (juce::FileSearchPath (pluginFolder.getFullPathName()), report);
+
+    const PluginManager::PluginInfo* chosen = nullptr;
+
+    for (const auto& info : pluginManager.getPlugins())
+        if (info.name.containsIgnoreCase (pluginName) && info.isInstrument)
+            chosen = &info;
+
+    if (chosen == nullptr)
+        return "No instrument matching '" + pluginName + "' was found in " + pluginFolder.getFullPathName();
+
+    report.add ("found instrument: " + chosen->name + " (" + chosen->manufacturer + ", " + chosen->format + ")"
+                  + ", isInstrument = " + juce::String ((int) chosen->isInstrument));
+
+    // Exactly what chooseInstrumentPlugin() does once the user has picked an entry.
+    document.beginEdit ("instrument plugin", "Load an instrument plugin");
+
+    auto& track = state.tracks[(size_t) trackIndex];
+    track.type = TrackType::sampler;
+    track.instrumentPlugin.name         = chosen->name;
+    track.instrumentPlugin.manufacturer = chosen->manufacturer;
+    track.instrumentPlugin.format       = chosen->format;
+    track.instrumentPlugin.isInstrument = true;
+
+    if (auto xml = chosen->description.createXml())
+        track.instrumentPlugin.descriptionXml = xml->toString (juce::XmlElement::TextFormat().singleLine());
+
+    document.markDirty();
+
+    const auto loadError = engine.loadTrackInstrument (trackIndex);
+    report.add ("loadTrackInstrument: " + (loadError.isEmpty() ? juce::String ("ok") : loadError));
+
+    if (loadError.isNotEmpty())
+        return report.joinIntoString ("\n");
+
+    report.add ("model reference: name = " + state.tracks[(size_t) trackIndex].instrumentPlugin.name
+                  + ", has description xml = "
+                  + juce::String (state.tracks[(size_t) trackIndex].instrumentPlugin.descriptionXml.isNotEmpty() ? "yes" : "no"));
+
+    // Silence first, so a stuck note from a previous test cannot masquerade as success.
+    juce::AudioBuffer<float> buffer (2, 512);
+
+    auto measurePeak = [this, &buffer] (int numSamples)
+    {
+        buffer.clear();
+        engine.renderBlockForTest (buffer, numSamples);
+        return buffer.getMagnitude (0, numSamples);
+    };
+
+    const auto silentPeak = measurePeak (512);
+    report.add ("silent render peak = " + juce::String (silentPeak, 4));
+
+    engine.triggerPreviewNote (trackIndex, 60, 0.9f);
+
+    // Render a couple of blocks so the plugin's attack is included.
+    auto notePeak = 0.0f;
+
+    for (int block = 0; block < 6; ++block)
+        notePeak = juce::jmax (notePeak, measurePeak (512));
+
+    report.add ("note render peak = " + juce::String (notePeak, 4));
+
+    // Undo must put the sampler back and take the plugin out of the graph.
+    document.undo();
+    engine.rebuildGraph();
+    engine.loadTrackInstrument (trackIndex);
+    const auto afterUndoPeak = measurePeak (512);
+
+    report.add ("after undo: instrument plugin valid = "
+                  + juce::String (document.getState().tracks[(size_t) trackIndex].instrumentPlugin.isValid() ? "yes" : "no")
+                  + ", engine slot = "
+                  + juce::String (engine.getTrackInstrumentSlot (trackIndex) != nullptr ? "present" : "empty"));
+
+    const auto ok = notePeak > 0.01f && silentPeak < 0.01f;
+
+    report.add (ok ? "RESULT: hosted instrument verified" : "RESULT: FAILED");
+
+    juce::ignoreUnused (afterUndoPeak);
+    return report.joinIntoString ("\n");
+}
+
+//==============================================================================
+void MainComponent::chooseInstrumentPlugin (int trackIndex)
+{
+    auto& state = document.getState();
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
+        return;
+
+    pluginManager.loadCachedList();
+
+    juce::PopupMenu menu;
+    std::vector<PluginManager::PluginInfo> instruments;
+
+    for (const auto& info : pluginManager.getPlugins())
+    {
+        if (! info.isInstrument)
+            continue;
+
+        instruments.push_back (info);
+        menu.addItem ((int) instruments.size(),
+                      info.manufacturer.isNotEmpty() ? info.name + "  (" + info.manufacturer + ")"
+                                                     : info.name);
+    }
+
+    if (instruments.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon,
+                                                "No instruments found",
+                                                "NUX did not find any VST3 instruments. Install a plugin, then "
+                                                "press RESCAN on the PLUGINS page.");
+        return;
+    }
+
+    const auto trackName = state.tracks[(size_t) trackIndex].name;
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&timelineView),
+                        [this, trackIndex, instruments, trackName] (int result)
+    {
+        if (result <= 0 || result > (int) instruments.size())
+            return;
+
+        const auto chosen = instruments[(size_t) result - 1];
+
+        // The project is the source of truth: write the reference into the model, then
+        // let the engine instantiate it. Undo restores the old reference and the same
+        // rebuild path brings the previous instrument back.
+        document.beginEdit ("instrument plugin", "Load an instrument plugin");
+
+        auto& track = document.getState().tracks[(size_t) trackIndex];
+        track.type = TrackType::sampler;
+
+        track.instrumentPlugin.name         = chosen.name;
+        track.instrumentPlugin.manufacturer = chosen.manufacturer;
+        track.instrumentPlugin.format       = chosen.format;
+        track.instrumentPlugin.isInstrument = true;
+
+        if (auto xml = chosen.description.createXml())
+            track.instrumentPlugin.descriptionXml = xml->toString (juce::XmlElement::TextFormat().singleLine());
+        else
+            track.instrumentPlugin.descriptionXml.clear();
+
+        document.markDirty();
+
+        const auto error = engine.loadTrackInstrument (trackIndex);
+
+        refreshAllViews();
+        updateWindowTitle();
+
+        showStatus (error.isEmpty()
+                      ? trackName + ": " + chosen.name
+                      : "Could not load " + chosen.name + " on " + trackName + ": " + error);
+    });
+}
+
+
+void MainComponent::useBuiltInInstrument (int trackIndex)
+{
+    auto& state = document.getState();
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
+        return;
+
+    document.beginEdit ("built-in instrument", "Use the built-in instrument");
+    document.getState().tracks[(size_t) trackIndex].instrumentPlugin = PluginReference();
+    document.getState().tracks[(size_t) trackIndex].instrumentStateBase64.clear();
+    document.markDirty();
+
+    engine.unloadTrackInstrument (trackIndex);
+    engine.rebuildGraph();
+    refreshAllViews();
+    updateWindowTitle();
+    showStatus (state.tracks[(size_t) trackIndex].name + ": built-in instrument");
+}
+
+//==============================================================================
+void MainComponent::toggleRecording()
+{
+    if (engine.isInputRecording())
+    {
+        const auto take = engine.stopInputRecording();
+
+        if (take.file == juce::File())
+        {
+            showStatus ("Recording was too short to keep");
+            timelineView.rebuild();
+            refreshAllViews();
+            return;
+        }
+
+        placeRecordedTake (take);
+        timelineView.rebuild();
+        refreshAllViews();
+        return;
+    }
+
+    // Make sure the armed state in the engine matches the project before starting.
+    engine.setProjectState (&document.getState());
+
+    const auto folder = document.getMediaFolder();
+    folder.createDirectory();
+
+    const auto error = engine.startInputRecording (folder);
+
+    if (error.isNotEmpty())
+    {
+        showStatus (error);
+
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                "Cannot record",
+                                                error);
+        return;
+    }
+
+    showStatus ("Recording...  press record again to stop");
+}
+
+bool MainComponent::fileIsInsideFolder (const juce::File& file, const juce::File& folder)
+{
+    const auto parent = file.getParentDirectory().getFullPathName();
+    const auto root = folder.getFullPathName();
+
+    return root.isNotEmpty() && parent.startsWith (root);
+}
+
+void MainComponent::placeRecordedTake (const AudioEngine::RecordedTake& take)
+{
+    auto& state = document.getState();
+
+    const auto trackIndex = juce::isPositiveAndBelow (take.trackIndex, (int) state.tracks.size())
+                              ? take.trackIndex
+                              : 0;
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
+        return;
+
+    document.beginEdit ("record audio", "Record an audio clip");
+    auto& track = state.tracks[(size_t) trackIndex];
+
+    // A recorded take turns the track into an audio track, exactly like an import,
+    // and the file lives in the project's media folder so the project stays portable.
+    track.type = TrackType::audio;
+
+    // A take inside the project is stored relative to it, so the project stays
+    // portable. A take from elsewhere keeps its absolute path, which the engine
+    // resolves as-is; storing only a bare file name would make it unloadable.
+    const auto folder = document.getProjectFolder();
+    const auto relative = take.file.getRelativePathFrom (folder);
+
+    AudioClip clip;
+    clip.name = take.file.getFileNameWithoutExtension();
+    clip.sourceFile = fileIsInsideFolder (take.file, folder) && relative.isNotEmpty()
+                        ? relative
+                        : take.file.getFullPathName();
+    clip.startStep = (int) std::round (take.startStep);
+    clip.lengthSteps = juce::jmax (1, (int) std::ceil (take.lengthSeconds * state.tempo / 60.0
+                                                       * (double) constants::stepsPerBeat));
+    clip.sourceStartSample = 0;
+
+    track.audioClips.push_back (clip);
+
+    // Grow the pattern so the new clip is inside it.
+    const auto clipEnd = clip.startStep + clip.lengthSteps;
+
+    if (clipEnd > state.patternLengthSteps)
+    {
+        auto newLength = state.patternLengthSteps;
+
+        while (newLength < clipEnd && newLength < constants::maxNumSteps)
+            newLength += constants::stepsPerBeat * 4;
+
+        state.patternLengthSteps = juce::jmin (newLength, constants::maxNumSteps);
+    }
+
+    engine.rebuildGraph();
+    engine.setMediaRootDirectory (document.getProjectFolder());
+    engine.reloadAudioClips();
+    engine.getTransport().setLoopLengthSteps (state.patternLengthSteps);
+
+    document.markDirty();
+    updateWindowTitle();
+
+    showStatus ("Recorded " + juce::String (take.lengthSeconds, 1) + " s onto " + track.name);
+}
+
+//==============================================================================
+juce::String MainComponent::runRecordingSelfTest (const juce::File& takeFile,
+                                                 double lengthSeconds, int trackIndex)
+{
+    juce::StringArray report;
+    auto& state = document.getState();
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
+        return "Track " + juce::String (trackIndex) + " does not exist";
+
+    report.add ("before: track = \"" + state.tracks[(size_t) trackIndex].name
+                  + "\", clips = " + juce::String ((int) state.tracks[(size_t) trackIndex].audioClips.size())
+                  + ", pattern steps = " + juce::String (state.patternLengthSteps));
+
+    // Hand the take to the same function the record button calls when it stops.
+    AudioEngine::RecordedTake take;
+    take.file = takeFile;
+    take.startStep = 0.0;
+    take.lengthSeconds = lengthSeconds;
+    take.trackIndex = trackIndex;
+
+    placeRecordedTake (take);
+    const auto& after = document.getState();
+    const auto& clips = after.tracks[(size_t) trackIndex].audioClips;
+
+    report.add ("after: track type = audio? " + juce::String (after.tracks[(size_t) trackIndex].type == TrackType::audio ? "yes" : "no")
+                  + ", clips = " + juce::String ((int) clips.size())
+                  + ", pattern steps = " + juce::String (after.patternLengthSteps)
+                  + ", loaded clip files = " + juce::String (engine.getNumLoadedClipFiles()));
+
+    if (! clips.empty())
+        report.add ("clip: \"" + clips[0].name + "\", file = " + clips[0].sourceFile
+                      + ", steps = " + juce::String (clips[0].lengthSteps)
+                      + ", length = " + juce::String (engine.getClipLengthSeconds (clips[0].sourceFile), 2) + " s");
+
+    const auto ok = ! clips.empty() && engine.getNumLoadedClipFiles() > 0;
+
+    report.add (ok ? "RESULT: recording placement verified" : "RESULT: FAILED");
+
+    return report.joinIntoString ("\n");
 }
 
 //==============================================================================
