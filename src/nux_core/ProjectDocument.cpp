@@ -11,6 +11,8 @@ void ProjectDocument::createNew()
 {
     state = ProjectState::createDefault();
     currentFile = juce::File();
+    history.clear();
+    lastChangeWasUndo = false;
     setHasUnsavedChanges (false);
     sendChangeMessage();
 }
@@ -24,6 +26,8 @@ bool ProjectDocument::loadFromFile (const juce::File& file, juce::String& error)
 
     state = std::move (loaded);
     currentFile = file;
+    history.clear();
+    lastChangeWasUndo = false;
     setHasUnsavedChanges (false);
     sendChangeMessage();
     return true;
@@ -89,5 +93,56 @@ juce::File ProjectDocument::getMediaFolder() const
 void ProjectDocument::markDirty()
 {
     setHasUnsavedChanges (true);
+}
+
+//==============================================================================
+void ProjectDocument::beginEdit (const juce::String& key, const juce::String& description)
+{
+    history.beginEdit (state, key, description);
+}
+
+bool ProjectDocument::restoreFromJson (const juce::String& json, bool isUndo)
+{
+    if (json.isEmpty())
+        return false;
+
+    ProjectState restored;
+    juce::String error;
+
+    if (! serializer::fromJson (json, restored, error))
+        return false;
+
+    state = std::move (restored);
+    dirty = true;
+    lastChangeWasUndo = true;
+
+    sendChangeMessage();
+    juce::ignoreUnused (isUndo);
+    return true;
+}
+
+bool ProjectDocument::undo()
+{
+    const auto target = history.undo (serializer::toJson (state));
+
+    if (target.isEmpty())
+        return false;
+
+    return restoreFromJson (target, true);
+}
+
+bool ProjectDocument::redo()
+{
+    const auto target = history.redo (serializer::toJson (state));
+
+    if (target.isEmpty())
+        return false;
+
+    return restoreFromJson (target, false);
+}
+
+void ProjectDocument::clearHistory()
+{
+    history.clear();
 }
 }

@@ -69,6 +69,10 @@ public:
 
     /** Changes one parameter of the insert currently shown in the editor. */
     bool setDemoInsertParameter (int parameterIndex, double value);
+
+    /** Headless self-test of the undo system through the real UI commands: makes an
+        edit, undoes it, redoes it, and reports what happened at each step. */
+    juce::String runUndoSelfTest();
     void toggleAudioSettings();
     void showAbout();
 
@@ -87,6 +91,10 @@ public:
 private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
+    void performUndo();
+    void performRedo();
+    void rebuildEverythingAfterHistoryJump (const juce::String& description);
     void handleAsyncUpdate() override;
     void setWorkspace (Workspace workspace);
     void updateWindowTitle();

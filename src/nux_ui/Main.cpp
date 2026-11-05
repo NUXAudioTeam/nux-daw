@@ -57,11 +57,16 @@ public:
         // GUI verifiable in CI environments that have no interactive display.
         const auto args = juce::StringArray::fromTokens (commandLine, true);
 
-        if (args.contains ("--demo-clip"))
+        const auto wantsDemo = args.contains ("--demo-clip")
+                            || args.contains ("--plugin")
+                            || args.contains ("--insert-editor")
+                            || args.contains ("--undo-self-test");
+
+        if (wantsDemo)
         {
             const auto fileIndex = args.indexOf ("--demo-clip") + 1;
 
-            if (fileIndex < args.size() && mainWindow != nullptr)
+            if (fileIndex > 0 && fileIndex < args.size() && mainWindow != nullptr)
                 if (auto* main = mainWindow->getMainComponent())
                     main->loadDemoProjectWithAudioClip (resolvePath (args[fileIndex]));
 
@@ -100,6 +105,10 @@ public:
                     }
                 }
             }
+
+            if (args.contains ("--undo-self-test") && mainWindow != nullptr)
+                if (auto* main = mainWindow->getMainComponent())
+                    juce::Logger::writeToLog ("UNDO SELF TEST:\n" + main->runUndoSelfTest());
 
             const auto shotIndex = args.indexOf ("--screenshot");
 

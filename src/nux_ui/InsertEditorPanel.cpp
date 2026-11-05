@@ -23,6 +23,8 @@ InsertEditorPanel::InsertEditorPanel (ProjectDocument& documentToUse, AudioEngin
     {
         if (auto* slot = findSlot())
         {
+            document.beginEdit ("insert bypass", "Bypass an insert");
+
             slot->bypassed = ! slot->bypassed;
             engine.syncMixerFromState();
             document.markDirty();
@@ -39,6 +41,8 @@ InsertEditorPanel::InsertEditorPanel (ProjectDocument& documentToUse, AudioEngin
     {
         if (auto* slot = findSlot())
         {
+            document.beginEdit ("insert reset", "Reset an insert");
+
             const auto type = slot->type;
             applyInsertDefaults (*slot, type);
             engine.syncMixerFromState();
@@ -93,6 +97,8 @@ InsertEditorPanel::InsertEditorPanel (ProjectDocument& documentToUse, AudioEngin
                 reference.descriptionXml = xml->toString (juce::XmlElement::TextFormat().singleLine());
 
             reference.stateSaved = false;
+
+            self->document.beginEdit ("insert plugin", "Load a plugin");
 
             modelSlot->type = InsertType::plugin;
             modelSlot->bypassed = false;
@@ -219,6 +225,10 @@ void InsertEditorPanel::applyValueToSlot (int parameterIndex, double newValue)
 
     if (! juce::isPositiveAndBelow (parameterIndex, (int) values.size()))
         return;
+
+    // Coalesced by key, so dragging a knob is one undo step rather than hundreds.
+    document.beginEdit ("insert param " + juce::String (parameterIndex), "Change an insert parameter");
+
     values[(size_t) parameterIndex] = newValue;
 
     writeInsertValues (*slot, values);

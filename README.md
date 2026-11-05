@@ -8,8 +8,9 @@ A digital audio workstation for Windows, written in C++20 with
 > **Status: 0.4.0 in progress.** NUX plays, sequences, mixes, plays back audio
 > clips, hosts VST3 effects *and* instruments in the audio path, saves projects
 > (including plugin state) and exports WAV. It is **not** a finished DAW yet:
-> there is no undo/redo or automation. `TODO-LIST.md` tracks the honest state of
-> every feature.
+> there is no automation yet. Every edit is undoable, and effect parameters
+> are editable from the mixer. `TODO-LIST.md` tracks the honest state of every
+> feature.
 
 ---
 
@@ -29,7 +30,9 @@ A digital audio workstation for Windows, written in C++20 with
 | Plugin editor windows, plugin chooser, per-slot bypass | ✅ |
 | `.nux` project save / load, 24-bit WAV export | ✅ |
 | **Audio clip playback, import and drag-and-drop** | ✅ |
-| Undo / redo, automation | ❌ not yet |
+| Undo / redo (`Ctrl+Z` / `Ctrl+Y`) | ✅ |
+| Editable effect parameters (EQ, compressor, delay, reverb) | ✅ |
+| Automation, MIDI learn | ❌ not yet |
 
 Screenshots of every workspace live in [`docs/screenshots/`](docs/screenshots).
 
@@ -98,6 +101,8 @@ ctest --test-dir build --output-on-failure
   track header for its instrument, output bus, name and **Import audio file...**.
   You can also drag a WAV/AIFF/FLAC/Ogg/MP3 file straight onto a track lane.
 - **Mixer** – faders, pan, mute/solo, insert slots and the two send effects per bus.
+  Click an insert to choose an effect or a plugin; **double-click** it to open the
+  parameter editor for that slot.
 - **Piano Roll** – click to add a note, drag to move, right-click to delete,
   `Shift`-drag to change pitch.
 - **Plugins** – scan the standard VST3 folders, then open a plugin editor.

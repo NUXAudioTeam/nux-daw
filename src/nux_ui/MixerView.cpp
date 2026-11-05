@@ -24,12 +24,19 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
     {
         auto& state = document.getState();
 
-        if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
-            state.tracks[(size_t) index].name = nameLabel.getText();
-        else if (kind == Kind::bus)
-            state.buses[(size_t) index].name = nameLabel.getText();
-        else
+        const auto isTrack = kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size());
+        const auto isBus   = kind == Kind::bus && juce::isPositiveAndBelow (index, constants::numMixerBuses);
+
+        if (! isTrack && ! isBus)
             return;
+
+        // Record the state before renaming, so undo restores the old name.
+        document.beginEdit ("track rename", "Rename a track");
+
+        if (isTrack)
+            state.tracks[(size_t) index].name = nameLabel.getText();
+        else
+            state.buses[(size_t) index].name = nameLabel.getText();
 
         document.markDirty();
 
@@ -47,6 +54,8 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
     {
         auto& state = document.getState();
         const auto value = (float) fader.getValue();
+
+        document.beginEdit ("fader", "Change the volume");
 
         if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
             state.tracks[(size_t) index].volumeDb = value;
@@ -67,6 +76,8 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
     {
         auto& state = document.getState();
 
+        document.beginEdit ("pan", "Change the pan");
+
         if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
             state.tracks[(size_t) index].pan = (float) value;
         else if (kind == Kind::bus)
@@ -80,6 +91,8 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
     {
         auto& state = document.getState();
         const auto muted = muteButton.getToggleState();
+
+        document.beginEdit ("mute", "Toggle mute");
 
         if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
             state.tracks[(size_t) index].muted = muted;
@@ -97,6 +110,8 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
         soloButton.onClick = [this]
         {
             auto& state = document.getState();
+
+            document.beginEdit ("solo", "Toggle solo");
 
             if (juce::isPositiveAndBelow (index, (int) state.tracks.size()))
                 state.tracks[(size_t) index].soloed = soloButton.getToggleState();
@@ -324,6 +339,8 @@ void ChannelStripComponent::showInsertMenu (int slotIndex)
         auto& state = document.getState();
         InsertSlot* slot = nullptr;
 
+        document.beginEdit ("insert change", "Edit an insert");
+
         if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
             slot = &state.tracks[(size_t) index].inserts[(size_t) slotIndex];
         else if (kind == Kind::bus && juce::isPositiveAndBelow (slotIndex, constants::maxBusInserts))
@@ -342,6 +359,8 @@ void ChannelStripComponent::showInsertMenu (int slotIndex)
             auto* enginePtr = &engine;
             auto* documentPtr = &document;
             auto* self = this;
+
+            documentPtr->beginEdit ("insert plugin", "Load a plugin");
 
             auto* manager = engine.getPluginManager();
             jassert (manager != nullptr);

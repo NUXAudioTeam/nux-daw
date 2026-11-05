@@ -210,6 +210,8 @@ void PianoRollCanvas::mouseDown (const juce::MouseEvent& e)
             {
                 if (e.mods.isRightButtonDown())
                 {
+                    document.beginEdit ("note delete", "Delete a note");
+
                     clip->notes.erase (clip->notes.begin() + (long) i);
                     engine.syncSequencerFromState();
                     document.markDirty();
@@ -246,6 +248,8 @@ void PianoRollCanvas::mouseDown (const juce::MouseEvent& e)
         note.midiNote = noteAtY (e.y);
         note.velocity = 0.85f;
 
+        document.beginEdit ("note add", "Add a note");
+
         if ((int) clip->notes.size() < constants::maxNotesPerClip)
             clip->notes.push_back (note);
 
@@ -276,6 +280,10 @@ void PianoRollCanvas::mouseDrag (const juce::MouseEvent& e)
         return;
 
     auto& note = clip->notes[(size_t) draggingNoteIndex];
+
+    // The first drag event is the real edit: snapshot before the note moves, and
+    // let the coalescing window keep the whole drag as one undo step.
+    document.beginEdit ("note drag", "Move a note");
 
     const auto stepDelta = stepAtX (e.x) - dragStartStep;
     note.step = juce::jlimit (0, getNumSteps() - 1, dragOriginalStep + stepDelta);
@@ -356,6 +364,8 @@ PianoRollView::PianoRollView (ProjectDocument& d, AudioEngine& e)
 
         if (juce::isPositiveAndBelow (canvas.getTrack(), (int) state.tracks.size()))
         {
+            document.beginEdit ("preset", "Change the instrument");
+
             state.tracks[(size_t) canvas.getTrack()].instrumentPreset = juce::jmax (0, presetChooser.getSelectedId() - 1);
             engine.syncSequencerFromState();
             document.markDirty();
@@ -398,6 +408,8 @@ PianoRollView::PianoRollView (ProjectDocument& d, AudioEngine& e)
 
         if (juce::isPositiveAndBelow (canvas.getTrack(), (int) state.tracks.size()))
         {
+            document.beginEdit ("clear notes", "Clear the notes");
+
             for (auto& clip : state.tracks[(size_t) canvas.getTrack()].clips)
                 clip.notes.clear();
 
@@ -423,6 +435,7 @@ PianoRollView::PianoRollView (ProjectDocument& d, AudioEngine& e)
 
     canvas.onNotesChanged = [this]
     {
+        // The edit already snapshotted; this callback only refreshes the views.
         document.markDirty();
 
         if (onProjectEdited)

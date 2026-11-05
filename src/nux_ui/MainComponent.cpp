@@ -21,6 +21,7 @@ public:
         gainKnob.setSuffix (" dB");
         gainKnob.onValueChange = [this] (double value)
         {
+            document.beginEdit ("master gain", "Change the master volume");
             document.getState().master.volumeDb = (float) value;
             engine.syncMixerFromState();
             document.markDirty();
@@ -30,6 +31,7 @@ public:
         limiterButton.setToggleState (document.getState().master.limiterEnabled, juce::dontSendNotification);
         limiterButton.onClick = [this]
         {
+            document.beginEdit ("limiter", "Toggle the master limiter");
             document.getState().master.limiterEnabled = limiterButton.getToggleState();
             engine.syncMixerFromState();
             document.markDirty();
@@ -195,6 +197,7 @@ MainComponent::MainComponent()
     transportBar.onAudioSettingsRequested = [this] { toggleAudioSettings(); };
     transportBar.onTempoChanged = [this]
     {
+        document.beginEdit ("tempo", "Change the tempo");
         document.markDirty();
         engine.rebuildGraph();
         updateWindowTitle();
@@ -399,6 +402,8 @@ enum CommandIDs
     cmdOpenProject,
     cmdSaveProject,
     cmdSaveProjectAs,
+    cmdUndo,
+    cmdRedo,
     cmdExportWav,
     cmdAudioSettings,
     cmdPlayStop,
@@ -421,6 +426,7 @@ void MainComponent::registerCommands()
 void MainComponent::getAllCommands (juce::Array<juce::CommandID>& commands)
 {
     commands.addArray ({ cmdNewProject, cmdOpenProject, cmdSaveProject, cmdSaveProjectAs,
+                         cmdUndo, cmdRedo,
                          cmdExportWav, cmdAudioSettings, cmdPlayStop, cmdToggleLoop,
                          cmdWorkspaceMain, cmdWorkspaceMixer, cmdWorkspacePianoRoll,
                          cmdWorkspacePlugins, cmdWorkspaceMaster, cmdAbout });
@@ -444,6 +450,25 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case cmdSaveProject:
             info.setInfo ("Save project", "Save the current project", "File", 0);
             info.addDefaultKeypress ('s', mod);
+            break;
+        case cmdUndo:
+            info.setInfo (document.getUndoDescription().isNotEmpty()
+                              ? "Undo " + document.getUndoDescription()
+                              : juce::String ("Undo"),
+                          "Revert the last change", "Edit", 0);
+            info.addDefaultKeypress ('z', juce::ModifierKeys::commandModifier);
+            info.setActive (document.canUndo());
+            break;
+        case cmdRedo:
+            info.setInfo (document.getRedoDescription().isNotEmpty()
+                              ? "Redo " + document.getRedoDescription()
+                              : juce::String ("Redo"),
+                          "Reapply the last undone change", "Edit", 0);
+            // Both the Windows/Linux and the macOS conventions.
+            info.addDefaultKeypress ('z', juce::ModifierKeys::commandModifier
+                                            | juce::ModifierKeys::shiftModifier);
+            info.addDefaultKeypress ('y', juce::ModifierKeys::commandModifier);
+            info.setActive (document.canRedo());
             break;
         case cmdSaveProjectAs:
             info.setInfo ("Save project as...", "Save the project to a new file", "File", 0);
@@ -499,6 +524,8 @@ bool MainComponent::perform (const InvocationInfo& info)
     {
         case cmdNewProject:       newProject(); return true;
         case cmdOpenProject:      openProject(); return true;
+        case cmdUndo:             performUndo(); return true;
+        case cmdRedo:             performRedo(); return true;
         case cmdSaveProject:      saveProject (false); return true;
         case cmdSaveProjectAs:    saveProject (true); return true;
         case cmdExportWav:        exportWav(); return true;
@@ -520,6 +547,60 @@ bool MainComponent::perform (const InvocationInfo& info)
         case cmdAbout:              showAbout(); return true;
         default: return false;
     }
+}
+
+//==============================================================================
+void MainComponent::performUndo()
+{
+    if (! document.undo())
+    {
+        showStatus ("Nothing to undo");
+        return;
+    }
+
+    rebuildEverythingAfterHistoryJump (document.getRedoDescription());
+}
+
+void MainComponent::performRedo()
+{
+    if (! document.redo())
+    {
+        showStatus ("Nothing to redo");
+        return;
+    }
+
+    rebuildEverythingAfterHistoryJump (document.getUndoDescription());
+}
+
+void MainComponent::rebuildEverythingAfterHistoryJump (const juce::String& description)
+{
+    // A snapshot restores the whole project, so every part of the engine that
+    // mirrors it has to be rebuilt: the graph itself, the clips, and the plugin
+    // instances (a plugin may have appeared or disappeared in the undone edit).
+    const auto wasPlaying = engine.getTransport().isPlaying();
+
+    if (wasPlaying)
+        engine.stop();
+
+    engine.setProjectState (&document.getState());
+    engine.rebuildGraph();
+    engine.setMediaRootDirectory (document.getProjectFolder());
+    engine.reloadAudioClips();
+
+    juce::StringArray warnings;
+    engine.reloadAllPlugins (warnings);
+
+    timelineView.rebuild();
+    mixerView.rebuild();
+    transportBar.getTempoKnob().setValue (document.getState().tempo, juce::dontSendNotification);
+
+    if (auto* editor = mixerView.getInsertEditor())
+        editor->refreshFromState();
+
+    refreshAllViews();
+    updateWindowTitle();
+
+    showStatus (description.isNotEmpty() ? description : juce::String ("Project restored"));
 }
 
 //==============================================================================
@@ -758,6 +839,8 @@ void MainComponent::importAudioFileInto (const juce::File& file, int trackIndex)
         engine.getTransport().setLoopLengthSteps (state.patternLengthSteps);
     }
 
+    document.beginEdit ("import audio", "Import an audio clip");
+
     track.audioClips.push_back (clip);
 
     engine.rebuildGraph();
@@ -890,6 +973,48 @@ bool MainComponent::setDemoInsertParameter (int parameterIndex, double value)
     }
 
     return false;
+}
+
+//==============================================================================
+juce::String MainComponent::runUndoSelfTest()
+{
+    juce::StringArray report;
+
+    auto& state = document.getState();
+    const auto originalName = state.tracks[0].name;
+
+    report.add ("start: track 1 = \"" + originalName + "\", undo steps = " + juce::String (document.getUndoCount()));
+
+    // Make a real edit through the same path the UI uses.
+    document.beginEdit ("self test rename", "Self test rename");
+    state.tracks[0].name = "Renamed by self test";
+    document.markDirty();
+    timelineView.rebuild();
+
+    report.add ("edited: track 1 = \"" + document.getState().tracks[0].name
+                  + "\", undo steps = " + juce::String (document.getUndoCount())
+                  + ", canUndo = " + juce::String ((int) document.canUndo()));
+
+    // Undo through the command, which is what Ctrl+Z triggers.
+    commandManager.invokeDirectly (cmdUndo, false);
+
+    report.add ("undo: track 1 = \"" + document.getState().tracks[0].name
+                  + "\", canRedo = " + juce::String ((int) document.canRedo()));
+
+    // Redo, again through the command.
+    commandManager.invokeDirectly (cmdRedo, false);
+
+    report.add ("redo: track 1 = \"" + document.getState().tracks[0].name + "\"");
+
+    const auto ok = document.getState().tracks[0].name == "Renamed by self test";
+
+    report.add (ok ? "RESULT: undo/redo verified" : "RESULT: FAILED");
+
+    // Leave the project as it started so the screenshot looks normal.
+    commandManager.invokeDirectly (cmdUndo, false);
+    document.setHasUnsavedChanges (false);
+
+    return report.joinIntoString ("\n");
 }
 
 //==============================================================================

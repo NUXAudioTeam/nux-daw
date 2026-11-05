@@ -7,6 +7,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Edit effect parameters.** Double-click an insert in the mixer to open a panel
+  with the slot's real parameters (EQ low/mid/high, compressor threshold/ratio/
+  attack, delay time/feedback/mix, reverb size/damping/mix), with units, correct
+  ranges, logarithmic frequency and a reset-to-defaults button. The descriptors
+  live in `nux_core/InsertParameters` and are shared by the editor, the insert menu
+  and the tests, so nothing can drift out of step with the DSP.
+- **Undo / redo.** `Ctrl+Z` and `Ctrl+Y` (or `Ctrl+Shift+Z`) undo and redo every
+  edit: steps, notes, clips, faders, pans, mutes, inserts, plugin loads, tempo,
+  pattern length, track add/duplicate/delete and renames. Repeated edits of the same
+  thing (dragging a knob) coalesce into one step. Undo restores the whole project,
+  then rebuilds the audio graph, the clips and the plugin instances to match.
+- Headless self-test for undo/redo (`--undo-self-test`) that drives the real
+  commands and prints what each step did.
 - **VST3 plugins now run in the audio path.** An insert slot can hold a hosted
   plugin instead of a built-in effect, and a track can be played by a hosted
   instrument instead of the sampler.
@@ -67,6 +80,19 @@ First working foundation. **Not a finished DAW** - see `TODO-LIST.md` for the
 honest list of what is still missing.
 
 ### Added
+- **Edit effect parameters.** Double-click an insert in the mixer to open a panel
+  with the slot's real parameters (EQ low/mid/high, compressor threshold/ratio/
+  attack, delay time/feedback/mix, reverb size/damping/mix), with units, correct
+  ranges, logarithmic frequency and a reset-to-defaults button. The descriptors
+  live in `nux_core/InsertParameters` and are shared by the editor, the insert menu
+  and the tests, so nothing can drift out of step with the DSP.
+- **Undo / redo.** `Ctrl+Z` and `Ctrl+Y` (or `Ctrl+Shift+Z`) undo and redo every
+  edit: steps, notes, clips, faders, pans, mutes, inserts, plugin loads, tempo,
+  pattern length, track add/duplicate/delete and renames. Repeated edits of the same
+  thing (dragging a knob) coalesce into one step. Undo restores the whole project,
+  then rebuilds the audio graph, the clips and the plugin instances to match.
+- Headless self-test for undo/redo (`--undo-self-test`) that drives the real
+  commands and prints what each step did.
 - **VST3 plugins now run in the audio path.** An insert slot can hold a hosted
   plugin instead of a built-in effect, and a track can be played by a hosted
   instrument instead of the sampler.

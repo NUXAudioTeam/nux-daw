@@ -9,8 +9,11 @@ target_sources(NUXTests PRIVATE
     EngineRenderTests.cpp
     PluginHostTests.cpp
     InsertParameterTests.cpp
+    UndoTests.cpp
+    ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/InsertParameters.cpp
+    ../src/nux_core/UndoHistory.cpp
     ../src/nux_core/TrackModel.cpp
     ../src/nux_engine/AudioClipPlayer.cpp
     ../src/nux_engine/AudioClipStore.cpp

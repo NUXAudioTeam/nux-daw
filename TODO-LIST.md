@@ -33,10 +33,11 @@
 | 2.2 | **Audio recording** | `startRecordingToFile()` engine එකේ තියෙනවා, නමුත් UI එකේ button එකකට **wire කරලා නැහැ** | Record button එක + input channel + latency compensation |
 | 2.3 | **VST3 plugin එක signal path එකට** | ✅ **හදලා ඉවරයි** — `PluginSlot` එකක් insert slot එකක process කරනවා, state එක project එකේ save/load වෙනවා, editor window + plugin chooser තියෙනවා. Real VST3 දෙකක් එක්ක test කරලා ✅ | ඉතුරු: plugin කිහිපයක් එකම track එකේ chain කිරීමේ UI |
 | 2.4 | **VST3 instrument track** | ✅ **හදලා ඉවරයි** — hosted instrument එකකට sequencer MIDI යනවා, dry signal එක suppress වෙනවා. Test කරලා ✅ | ඉතුරු: track header එකෙන් instrument එක තෝරන UI menu එක (දැන් engine API එකෙන් විතරයි) |
+| 2.9 | **Undo / Redo** | ✅ **හදලා ඉවරයි** — `Ctrl+Z` / `Ctrl+Y`, හැම edit එකක්ම (steps, notes, clips, faders, inserts, plugins, tempo, tracks, renames). Same edit එකක් drag කරද්දී එක step එකක් විතරයි (coalescing) | ඉතුරු: mixer value එකක් drag කරලා *පස්සේ* තව edit එකක් කළොත් step දෙකක් වෙන්න පුළුවන් (450 ms window) |
 | 2.5 | **Piano roll velocity knob** | UI එකේ තියෙනවා, `ignoreUnused` කරලා තියෙන්නේ | Note එකක් draw කරද්දී ඒ value එක use කරන්න + note එකේ velocity edit කරන්න |
 | 2.6 | **Octave +/- buttons** | `octaveOffset` විතරයි වෙනස් වෙන්නේ, canvas එකේ view එක scroll වෙන්නේ නැහැ | `setLowestNote()` එකට hook කරන්න |
 | 2.7 | **Pattern clips (multi-clip)** | Model එකේ `Clip` array එකක් තියෙනවා, නමුත් UI එකේ **එකම clip එක** විතරයි edit වෙන්නේ | Timeline එකේ clip blocks, add/delete/move |
-| 2.8 | **Insert parameter editing** | Insert එකක් add කරන්න පුළුවන්, නමුත් **knob එකකින් value වෙනස් කරන්න බැහැ** | Insert එක click කරද්දී parameter panel එකක් |
+| 2.8 | **Insert parameter editing** | ✅ **හදලා ඉවරයි** — insert එක double-click කළාම knobs වලින් parameters edit කරන්න පුළුවන් (units, ranges, log frequency, reset). Descriptors `nux_core/InsertParameters` එකේ | ඉතුරු: plugin parameters සඳහා generic knobs |
 | 2.9 | **Track reorder / delete UI** | Right-click menu එකේ තියෙනවා, නමුත් drag-to-reorder නැහැ | Drag & drop track ordering |
 | 2.10 | **Loop length vs pattern length** | `patternLengthSteps` විතරයි; song mode එකක් නැහැ | Arrangement/song mode (9 වෙනි කොටස බලන්න) |
 
