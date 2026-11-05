@@ -155,6 +155,7 @@ void AudioEngine::rebuildGraph()
             track.clipBuffer.setSize (2, blockSize, false, true, true);
             track.strip.prepare (sampleRate, blockSize, 2);
             track.strip.preparePlugins (sampleRate, blockSize, 2);
+            track.strip.sanitisePluginSlotTypes();
             track.clipPlayer.prepare (sampleRate, blockSize);
         }
     }
@@ -1272,7 +1273,7 @@ int AudioEngine::getNumLoadedPlugins() const
 
     for (int i = 0; i < trackCount; ++i)
         for (int s = 0; s < constants::maxTrackInserts; ++s)
-            if (const_cast<TrackEngine&> (tracks[(size_t) i]).strip.getPluginSlot (s) != nullptr)
+            if (tracks[(size_t) i].strip.getPluginSlot (s) != nullptr)
                 ++count;
 
     return count;
