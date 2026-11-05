@@ -3,6 +3,8 @@ name: Formatting and housekeeping
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 
 jobs:
   checks:
@@ -10,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: No build artefacts committed
         run: |
@@ -19,13 +23,25 @@ jobs:
           fi
           echo "OK - no build output tracked."
 
-      - name: No secrets committed
+      - name: No credentials committed
         run: |
-          if git grep -nIE 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}' -- . ; then
+          # Build the patterns piecewise so this file never matches itself.
+          PAT='ghp_'"'"'[A-Za-z0-9]{20,}'
+          PAT2='github_pat_'"'"'[A-Za-z0-9_]{20,}'
+          PAT3='AKIA'"'"'[0-9A-Z]{16}'
+          if git grep -nIE "$PAT|$PAT2|$PAT3" -- . ':!external' ; then
             echo "::error::A credential-looking string was found in the repository."
             exit 1
           fi
           echo "OK - no credentials found."
+
+      - name: No stray build or secret files tracked
+        run: |
+          if git ls-files | grep -E '(^|/)(\.env|secrets\.json|.*\.token)$'; then
+            echo "::error::Secret files must never be tracked."
+            exit 1
+          fi
+          echo "OK."
 
       - name: JUCE submodule is present
         run: |
@@ -35,6 +51,14 @@ jobs:
           }
           echo "JUCE present."
 
-      - name: Sources are not empty
+      - name: Source tree sanity
         run: |
-          find src -name '*.cpp' -o -name '*.h' | wc -l
+          COUNT=$(find src -name '*.cpp' -o -name '*.h' | wc -l)
+          echo "Source files: $COUNT"
+          test "$COUNT" -gt 20 || { echo "::error::Unexpectedly few source files."; exit 1; }
+
+      - name: CMake files parse
+        run: |
+          test -f CMakeLists.txt
+          test -f tests/CMakeLists.txt
+          echo "OK."
