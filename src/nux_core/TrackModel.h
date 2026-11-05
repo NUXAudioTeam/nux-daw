@@ -24,7 +24,35 @@ enum class InsertType
     eq,
     compressor,
     delay,
-    reverb
+    reverb,
+    plugin     // a hosted VST3 (or other JUCE-supported) plugin, described by the fields below
+};
+
+/** Everything needed to recreate a hosted plugin instance, including its state.
+
+    The description is stored as JSON text so the project model keeps depending
+    only on juce_core. It is the serialized juce::PluginDescription, which is what
+    juce::KnownPluginList and the format manager use to instantiate a plugin. */
+struct PluginReference
+{
+    juce::String descriptionXml;    // juce::PluginDescription::createXml() as text
+    juce::String name;              // display name, cached for menus
+    juce::String manufacturer;
+    juce::String format;            // "VST3"
+    bool isInstrument = false;
+    bool stateSaved   = false;      // false when the plugin could not be loaded at save time
+
+    bool isValid() const noexcept { return descriptionXml.isNotEmpty(); }
+    bool operator== (const PluginReference& o) const noexcept
+    {
+        return descriptionXml == o.descriptionXml
+            && name == o.name
+            && manufacturer == o.manufacturer
+            && format == o.format
+            && isInstrument == o.isInstrument
+            && stateSaved == o.stateSaved;
+    }
+    bool operator!= (const PluginReference& o) const noexcept { return ! (*this == o); }
 };
 
 /** One insert slot on a channel strip. Parameters are generic so that the
@@ -37,13 +65,20 @@ struct InsertSlot
     float p2 = 0.0f;
     float p3 = 0.0f;
 
+    /** Only used when type == InsertType::plugin. */
+    PluginReference plugin;
+    /** Base64 plugin state, written by the engine when the project is saved. */
+    juce::String pluginStateBase64;
+
     bool isActive() const noexcept { return type != InsertType::none && ! bypassed; }
+    bool isPlugin() const noexcept { return type == InsertType::plugin; }
     bool operator== (const InsertSlot& o) const noexcept
     {
         return type == o.type && bypassed == o.bypassed
             && juce::exactlyEqual (p1, o.p1)
             && juce::exactlyEqual (p2, o.p2)
-            && juce::exactlyEqual (p3, o.p3);
+            && juce::exactlyEqual (p3, o.p3)
+            && plugin == o.plugin;
     }
     bool operator!= (const InsertSlot& o) const noexcept { return ! (*this == o); }
 };
@@ -122,6 +157,16 @@ struct TrackState
     int instrumentPreset = 0; // 0 = Analog Kit, 1 = Sub Bass, 2 = Pluck ...
 
     std::array<InsertSlot, constants::maxTrackInserts> inserts {};
+
+    /** When set, the track is played by a hosted instrument plugin instead of the
+        built-in sampler. Notes are still sequenced by the step sequencer. */
+    PluginReference instrumentPlugin;
+    juce::String instrumentStateBase64;
+
+    bool usesPluginInstrument() const noexcept
+    {
+        return type == TrackType::sampler && instrumentPlugin.isValid();
+    }
 
     int numSteps = constants::defaultNumSteps;
     std::array<Step, constants::maxNumSteps> steps {};

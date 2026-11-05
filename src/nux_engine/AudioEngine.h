@@ -24,6 +24,8 @@
 #include "AudioClipPlayer.h"
 #include "AudioClipStore.h"
 #include "ChannelStrip.h"
+#include "PluginManager.h"
+#include "PluginSlot.h"
 #include "Synth.h"
 #include "Transport.h"
 
@@ -75,6 +77,50 @@ public:
 
     /** Re-reads pattern data (steps) into the sequencer snapshot. */
     void syncSequencerFromState();
+
+    //==============================================================================
+    // Hosted plugins (VST3 and anything else JUCE can host)
+
+    /** Which strip a plugin insert belongs to. */
+    enum class StripKind { track, bus, master };
+
+    void setPluginManager (PluginManager* manager) noexcept { pluginManager = manager; }
+    PluginManager* getPluginManager() const noexcept { return pluginManager; }
+
+    /** Instantiates the plugin described by the current project state for one insert
+        slot, restores its saved state and puts it in the strip's signal path.
+
+        The project state is the single source of truth: the caller writes the
+        PluginReference (and optional state) into the model first, then calls this.
+        Returns an empty string on success, otherwise a message for the user. */
+    juce::String loadInsertPlugin (StripKind kind, int stripIndex, int slotIndex);
+
+    /** Instantiates the hosted instrument described by project state for a track,
+        restoring its saved state. The built-in sampler is bypassed while it plays. */
+    juce::String loadTrackInstrument (int trackIndex);
+
+    void unloadInsertPlugin (StripKind kind, int stripIndex, int slotIndex);
+    void unloadTrackInstrument (int trackIndex);
+
+    /** Recreates every plugin referenced by the current project state. Slots whose
+        plugin cannot be found are reported through `warnings`. */
+    void reloadAllPlugins (juce::StringArray& warnings);
+
+    /** Re-prepares every live plugin instance after a sample rate / block change. */
+    void preparePluginsForGraph();
+
+    /** Writes the live state of every hosted plugin back into the project state so
+        the next save can store it. Call before serialising. */
+    void capturePluginStates();
+
+    /** Number of hosted plugin instances currently alive in the graph. */
+    int getNumLoadedPlugins() const;
+
+    /** The live instance for an insert slot, or nullptr. Used by the editor window. */
+    PluginSlot* getInsertPluginSlot (StripKind kind, int stripIndex, int slotIndex);
+
+    /** The hosted instrument of a track, or nullptr when the sampler is in use. */
+    PluginSlot* getTrackInstrumentSlot (int trackIndex);
 
     //==============================================================================
     // Audio clips
@@ -167,6 +213,11 @@ public:
     void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
 
 private:
+    ChannelStrip* findStrip (StripKind kind, int stripIndex);
+    std::unique_ptr<PluginSlot> createSlotFor (const PluginReference& reference,
+                                               bool wantMidi, juce::String& error);
+    void stopDeviceForGraphEdit();
+    void restartDeviceAfterGraphEdit();
     void prepare (double newSampleRate, int newBlockSize);
     void renderBlock (juce::AudioBuffer<float>& output, int numSamples);
     void runSequencer (int numSamples);
@@ -200,6 +251,8 @@ private:
     std::array<std::array<bool, 128>, constants::maxTracks> noteHeld {};
 
     SynthParameters synthParameters;
+
+    PluginManager* pluginManager = nullptr;
 
     AudioClipStore clipStore;
     juce::File mediaRoot;

@@ -57,6 +57,11 @@ public:
 
     /** Builds a demo project that contains an audio clip. Used by the smoke test. */
     void loadDemoProjectWithAudioClip (const juce::File& audioFile);
+
+    /** Loads a plugin into a track's first insert slot and reports the result.
+        Used by the headless smoke test and by any future command line tooling. */
+    juce::String loadPluginIntoDemoTrack (int trackIndex, const juce::File& pluginFolder,
+                                          const juce::String& pluginName);
     void toggleAudioSettings();
     void showAbout();
 

@@ -233,6 +233,7 @@ MainComponent::MainComponent()
         statusLabel.setColour (juce::Label::textColourId, theme::warn);
     }
 
+    engine.setPluginManager (&pluginManager);
     engine.rebuildGraph();
 
     registerCommands();
@@ -576,6 +577,13 @@ void MainComponent::loadProjectFile (const juce::File& file)
     engine.setMediaRootDirectory (document.getProjectFolder());
     engine.rebuildGraph();
     engine.reloadAudioClips();
+
+    juce::StringArray pluginWarnings;
+    engine.reloadAllPlugins (pluginWarnings);
+
+    if (! pluginWarnings.isEmpty())
+        showStatus ("Some plugins could not be loaded: " + pluginWarnings.joinIntoString ("; "));
+
     transportBar.getTempoKnob().setValue (document.getState().tempo, juce::dontSendNotification);
     refreshAllViews();
     timelineView.rebuild();
@@ -584,6 +592,10 @@ void MainComponent::loadProjectFile (const juce::File& file)
 
 void MainComponent::saveProject (bool saveAs)
 {
+    // Plugin parameters live inside the plugin, so read them back into the project
+    // before the file is written.
+    engine.capturePluginStates();
+
     if (! saveAs && document.getCurrentFile() != juce::File())
     {
         juce::String error;
@@ -781,6 +793,57 @@ void MainComponent::loadDemoProjectWithAudioClip (const juce::File& audioFile)
 
     timelineView.rebuild();
     refreshAllViews();
+}
+
+//==============================================================================
+juce::String MainComponent::loadPluginIntoDemoTrack (int trackIndex,
+                                                     const juce::File& pluginFolder,
+                                                     const juce::String& pluginName)
+{
+    pluginManager.addSearchPaths (juce::FileSearchPath (pluginFolder.getFullPathName()));
+
+    juce::StringArray scanErrors;
+    pluginManager.scanNow (juce::FileSearchPath (pluginFolder.getFullPathName()), scanErrors);
+
+    const PluginManager::PluginInfo* chosen = nullptr;
+
+    for (const auto& info : pluginManager.getPlugins())
+        if (info.name.containsIgnoreCase (pluginName))
+            chosen = &info;
+
+    if (chosen == nullptr)
+        return "The plugin '" + pluginName + "' was not found in " + pluginFolder.getFullPathName();
+
+    auto& state = document.getState();
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
+        return "Track " + juce::String (trackIndex) + " does not exist";
+
+    PluginReference reference;
+    reference.name         = chosen->name;
+    reference.manufacturer = chosen->manufacturer;
+    reference.format       = chosen->format;
+    reference.isInstrument = chosen->isInstrument;
+
+    if (auto xml = chosen->description.createXml())
+        reference.descriptionXml = xml->toString (juce::XmlElement::TextFormat().singleLine());
+
+    auto& slot = state.tracks[(size_t) trackIndex].inserts[0];
+    slot.type = InsertType::plugin;
+    slot.bypassed = false;
+    slot.plugin = reference;
+    slot.pluginStateBase64.clear();
+
+    const auto error = engine.loadInsertPlugin (AudioEngine::StripKind::track, trackIndex, 0);
+
+    engine.syncMixerFromState();
+    refreshAllViews();
+
+    if (error.isNotEmpty())
+        return error;
+
+    return "Loaded " + chosen->name + " into " + state.tracks[(size_t) trackIndex].name
+             + " insert 1 (" + juce::String (engine.getNumLoadedPlugins()) + " plugin instances alive)";
 }
 
 //==============================================================================

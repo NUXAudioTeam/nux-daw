@@ -154,6 +154,7 @@ void AudioEngine::rebuildGraph()
             track.buffer.setSize (2, blockSize, false, true, true);
             track.clipBuffer.setSize (2, blockSize, false, true, true);
             track.strip.prepare (sampleRate, blockSize, 2);
+            track.strip.preparePlugins (sampleRate, blockSize, 2);
             track.clipPlayer.prepare (sampleRate, blockSize);
         }
     }
@@ -462,6 +463,7 @@ void AudioEngine::prepare (double newSampleRate, int newBlockSize)
         bus.prepareBus (sampleRate, blockSize);
 
     masterBus.prepareMaster (sampleRate, blockSize);
+    preparePluginsForGraph();
     recordScratch.setSize (2, blockSize, false, true, true);
 
     scopeDecimation = juce::jmax (1, (int) std::round (sampleRate / 22050.0));
@@ -724,7 +726,20 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
         midi.swapWith (previewMidi[(size_t) i]);
         midi.addEvents (previewMidi[(size_t) i], 0, -1, 0);
 
-        track.synth.renderNextBlock (buffer, midi, 0, numSamples);
+        if (track.strip.hasInstrumentPlugin())
+        {
+            // A hosted instrument generates the track's audio itself; the synth is
+            // bypassed so the two sources are never summed together.
+            track.synth.renderNextBlock (buffer, midi, 0, numSamples);
+
+            // The synth was given the MIDI buffer and consumed nothing from it, so
+            // the same events are handed to the plugin by the strip below.
+            buffer.clear (0, numSamples);
+        }
+        else
+        {
+            track.synth.renderNextBlock (buffer, midi, 0, numSamples);
+        }
 
         const auto soloed = tracksSoloed[(size_t) i].load (std::memory_order_relaxed);
         const auto audible = anySolo ? soloed : true;
@@ -735,7 +750,7 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
             continue;
         }
 
-        track.strip.process (buffer, 1.0f);
+        track.strip.process (buffer, 1.0f, &midi);
 
         const auto busIndex = juce::jlimit (0, constants::numMixerBuses - 1, trackBusIndex[(size_t) i]);
         buses[(size_t) busIndex].addFromTrack (buffer);
@@ -1038,5 +1053,377 @@ bool AudioEngine::exportToWav (const ExportOptions& options, juce::String& error
     }
 
     return success;
+}
+
+//==============================================================================
+// Hosted plugins
+//==============================================================================
+ChannelStrip* AudioEngine::findStrip (StripKind kind, int stripIndex)
+{
+    if (kind == StripKind::track)
+        return juce::isPositiveAndBelow (stripIndex, trackCount) ? &tracks[(size_t) stripIndex].strip : nullptr;
+
+    if (kind == StripKind::bus)
+        return juce::isPositiveAndBelow (stripIndex, constants::numMixerBuses) ? &buses[(size_t) stripIndex] : nullptr;
+
+    return &masterBus;
+}
+
+void AudioEngine::stopDeviceForGraphEdit()
+{
+    if (audioReady)
+    {
+        deviceManager.removeAudioCallback (this);
+        deviceManager.closeAudioDevice();
+    }
+}
+
+void AudioEngine::restartDeviceAfterGraphEdit()
+{
+    if (audioReady)
+    {
+        deviceManager.initialise (0, 2, nullptr, true);
+        deviceManager.addAudioCallback (this);
+        audioReady = deviceManager.getCurrentAudioDevice() != nullptr;
+    }
+}
+
+std::unique_ptr<PluginSlot> AudioEngine::createSlotFor (const PluginReference& reference,
+                                                        bool wantMidi,
+                                                        juce::String& error)
+{
+    error.clear();
+
+    if (pluginManager == nullptr)
+    {
+        error = "The plugin manager is not available.";
+        return nullptr;
+    }
+
+    if (! reference.isValid())
+    {
+        error = "The project does not describe a plugin for this slot.";
+        return nullptr;
+    }
+
+    // PluginDescription stores itself as XML; that text is what the project keeps.
+    juce::PluginDescription description;
+
+    if (auto xml = juce::parseXML (reference.descriptionXml))
+        description.loadFromXml (*xml);
+
+    if (description.name.isEmpty())
+    {
+        error = "The stored plugin description could not be read.";
+        return nullptr;
+    }
+
+    auto instance = pluginManager->createInstance (description, sampleRate, blockSize, error);
+
+    if (instance == nullptr)
+        return nullptr;
+
+    return std::make_unique<PluginSlot> (std::move (instance), sampleRate, blockSize, 2, wantMidi);
+}
+
+juce::String AudioEngine::loadInsertPlugin (StripKind kind, int stripIndex, int slotIndex)
+{
+    auto* strip = findStrip (kind, stripIndex);
+
+    if (strip == nullptr)
+        return "That channel does not exist.";
+
+    if (! juce::isPositiveAndBelow (slotIndex, constants::maxTrackInserts))
+        return "That insert slot does not exist.";
+
+    if (projectState == nullptr)
+        return "No project is open.";
+
+    InsertSlot* modelSlot = nullptr;
+    juce::String referenceState;
+
+    if (kind == StripKind::track && juce::isPositiveAndBelow (stripIndex, (int) projectState->tracks.size()))
+        modelSlot = &projectState->tracks[(size_t) stripIndex].inserts[(size_t) slotIndex];
+    else if (kind == StripKind::bus && juce::isPositiveAndBelow (stripIndex, constants::numMixerBuses))
+        modelSlot = &projectState->buses[(size_t) stripIndex].inserts[(size_t) slotIndex];
+    else if (kind == StripKind::master)
+        modelSlot = &projectState->master.inserts[(size_t) slotIndex];
+
+    if (modelSlot == nullptr)
+        return "That insert slot does not exist in the project.";
+
+    juce::String error;
+    auto slot = createSlotFor (modelSlot->plugin, true, error);
+
+    if (slot == nullptr)
+        return error.isNotEmpty() ? error : "The plugin could not be loaded.";
+
+    referenceState = modelSlot->pluginStateBase64;
+
+    // Restore the saved parameter/state blob before the plugin starts processing.
+    if (referenceState.isNotEmpty())
+    {
+        juce::MemoryBlock state;
+        state.fromBase64Encoding (referenceState);
+
+        if (state.getSize() > 0)
+            slot->getInstance()->setStateInformation (state.getData(), (int) state.getSize());
+    }
+
+    stopDeviceForGraphEdit();
+
+    strip->setPluginSlot (slotIndex, std::move (slot));
+
+    auto& params = strip->getParameters();
+    params.inserts[(size_t) slotIndex].type = InsertType::plugin;
+    params.inserts[(size_t) slotIndex].bypassed = false;
+    params.insertTypes[(size_t) slotIndex].store ((int) InsertType::plugin, std::memory_order_release);
+
+    restartDeviceAfterGraphEdit();
+    return {};
+}
+
+juce::String AudioEngine::loadTrackInstrument (int trackIndex)
+{
+    if (! juce::isPositiveAndBelow (trackIndex, trackCount) || projectState == nullptr)
+        return "That track does not exist.";
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) projectState->tracks.size()))
+        return "That track does not exist.";
+
+    const auto& modelTrack = projectState->tracks[(size_t) trackIndex];
+
+    juce::String error;
+    auto slot = createSlotFor (modelTrack.instrumentPlugin, true, error);
+
+    if (slot == nullptr)
+        return error.isNotEmpty() ? error : "The plugin could not be loaded.";
+
+    if (modelTrack.instrumentStateBase64.isNotEmpty())
+    {
+        juce::MemoryBlock state;
+        state.fromBase64Encoding (modelTrack.instrumentStateBase64);
+
+        if (state.getSize() > 0)
+            slot->getInstance()->setStateInformation (state.getData(), (int) state.getSize());
+    }
+
+    stopDeviceForGraphEdit();
+
+    // The instrument replaces the sampler, so it lives in the first insert slot of
+    // the track's strip: the same mechanism as an effect, with the input suppressed.
+    tracks[(size_t) trackIndex].strip.setPluginSlot (0, std::move (slot));
+
+    auto& params = tracks[(size_t) trackIndex].strip.getParameters();
+    params.inserts[0].type = InsertType::plugin;
+    params.inserts[0].bypassed = false;
+    params.insertTypes[0].store ((int) InsertType::plugin, std::memory_order_release);
+
+    restartDeviceAfterGraphEdit();
+    return {};
+}
+
+void AudioEngine::unloadInsertPlugin (StripKind kind, int stripIndex, int slotIndex)
+{
+    if (auto* strip = findStrip (kind, stripIndex))
+    {
+        stopDeviceForGraphEdit();
+
+        strip->setPluginSlot (slotIndex, nullptr);
+        strip->getParameters().setInsert (slotIndex, InsertType::none);
+
+        restartDeviceAfterGraphEdit();
+    }
+}
+
+void AudioEngine::unloadTrackInstrument (int trackIndex)
+{
+    if (! juce::isPositiveAndBelow (trackIndex, trackCount))
+        return;
+
+    stopDeviceForGraphEdit();
+
+    auto& track = tracks[(size_t) trackIndex];
+    track.strip.setPluginSlot (0, nullptr);
+    track.strip.getParameters().setInsert (0, InsertType::none);
+
+    restartDeviceAfterGraphEdit();
+}
+
+PluginSlot* AudioEngine::getInsertPluginSlot (StripKind kind, int stripIndex, int slotIndex)
+{
+    if (auto* strip = findStrip (kind, stripIndex))
+        return strip->getPluginSlot (slotIndex);
+
+    return nullptr;
+}
+
+PluginSlot* AudioEngine::getTrackInstrumentSlot (int trackIndex)
+{
+    if (! juce::isPositiveAndBelow (trackIndex, trackCount))
+        return nullptr;
+
+    return tracks[(size_t) trackIndex].strip.getPluginSlot (0);
+}
+
+int AudioEngine::getNumLoadedPlugins() const
+{
+    int count = 0;
+
+    for (int i = 0; i < trackCount; ++i)
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+            if (const_cast<TrackEngine&> (tracks[(size_t) i]).strip.getPluginSlot (s) != nullptr)
+                ++count;
+
+    return count;
+}
+
+void AudioEngine::preparePluginsForGraph()
+{
+    for (int i = 0; i < trackCount; ++i)
+        tracks[(size_t) i].strip.preparePlugins (sampleRate, blockSize, 2);
+
+    for (auto& bus : buses)
+        bus.preparePlugins (sampleRate, blockSize, 2);
+
+    masterBus.preparePlugins (sampleRate, blockSize, 2);
+}
+
+void AudioEngine::reloadAllPlugins (juce::StringArray& warnings)
+{
+    warnings.clear();
+
+    if (projectState == nullptr)
+        return;
+
+    stopDeviceForGraphEdit();
+
+    // Tracks: hosted instrument first, then the insert chain.
+    for (int i = 0; i < trackCount; ++i)
+    {
+        auto& strip = tracks[(size_t) i].strip;
+
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+            strip.setPluginSlot (s, nullptr);
+
+        strip.getParameters().clearInserts();
+
+        if (i >= (int) projectState->tracks.size())
+            continue;
+
+        const auto& modelTrack = projectState->tracks[(size_t) i];
+
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+        {
+            const auto& modelSlot = modelTrack.inserts[(size_t) s];
+
+            if (modelSlot.type != InsertType::plugin || ! modelSlot.plugin.isValid())
+                continue;
+
+            const auto error = loadInsertPlugin (StripKind::track, i, s);
+
+            if (error.isNotEmpty())
+                warnings.add (modelTrack.name + " / insert " + juce::String (s + 1) + ": " + error);
+        }
+    }
+
+    for (int i = 0; i < constants::numMixerBuses; ++i)
+    {
+        auto& strip = buses[(size_t) i];
+
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+        {
+            strip.setPluginSlot (s, nullptr);
+            strip.getParameters().setInsert (s, InsertType::none);
+        }
+
+        if (i >= (int) projectState->buses.size())
+            continue;
+
+        const auto& modelBus = projectState->buses[(size_t) i];
+
+        for (int s = 0; s < constants::maxBusInserts; ++s)
+        {
+            const auto& modelSlot = modelBus.inserts[(size_t) s];
+
+            if (modelSlot.type != InsertType::plugin || ! modelSlot.plugin.isValid())
+                continue;
+
+            const auto error = loadInsertPlugin (StripKind::bus, i, s);
+
+            if (error.isNotEmpty())
+                warnings.add (modelBus.name + " / insert " + juce::String (s + 1) + ": " + error);
+        }
+    }
+
+    for (int s = 0; s < constants::maxTrackInserts; ++s)
+    {
+        masterBus.setPluginSlot (s, nullptr);
+        masterBus.getParameters().setInsert (s, InsertType::none);
+    }
+
+    for (int s = 0; s < constants::maxTrackInserts; ++s)
+    {
+        const auto& modelSlot = projectState->master.inserts[(size_t) s];
+
+        if (modelSlot.type != InsertType::plugin || ! modelSlot.plugin.isValid())
+            continue;
+
+        const auto error = loadInsertPlugin (StripKind::master, -1, s);
+
+        if (error.isNotEmpty())
+            warnings.add ("Master / insert " + juce::String (s + 1) + ": " + error);
+    }
+
+    restartDeviceAfterGraphEdit();
+}
+
+void AudioEngine::capturePluginStates()
+{
+    if (projectState == nullptr)
+        return;
+
+    const auto captureSlot = [] (InsertSlot& modelSlot, PluginSlot* liveSlot)
+    {
+        if (modelSlot.type != InsertType::plugin)
+            return;
+
+        if (liveSlot == nullptr || liveSlot->getInstance() == nullptr)
+        {
+            modelSlot.plugin.stateSaved = false;
+            return;
+        }
+
+        juce::MemoryBlock state;
+        liveSlot->getInstance()->getStateInformation (state);
+
+        if (state.getSize() > 0)
+        {
+            modelSlot.pluginStateBase64 = state.toBase64Encoding();
+            modelSlot.plugin.stateSaved = true;
+        }
+        else
+        {
+            modelSlot.pluginStateBase64.clear();
+            modelSlot.plugin.stateSaved = false;
+        }
+    };
+
+    for (int i = 0; i < trackCount && i < (int) projectState->tracks.size(); ++i)
+    {
+        auto& modelTrack = projectState->tracks[(size_t) i];
+        auto& strip = tracks[(size_t) i].strip;
+
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+            captureSlot (modelTrack.inserts[(size_t) s], strip.getPluginSlot (s));
+    }
+
+    for (int i = 0; i < constants::numMixerBuses; ++i)
+        for (int s = 0; s < constants::maxBusInserts; ++s)
+            captureSlot (projectState->buses[(size_t) i].inserts[(size_t) s],
+                         buses[(size_t) i].getPluginSlot (s));
+
+    for (int s = 0; s < constants::maxTrackInserts; ++s)
+        captureSlot (projectState->master.inserts[(size_t) s], masterBus.getPluginSlot (s));
 }
 }

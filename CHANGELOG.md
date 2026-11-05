@@ -7,6 +7,23 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **VST3 plugins now run in the audio path.** An insert slot can hold a hosted
+  plugin instead of a built-in effect, and a track can be played by a hosted
+  instrument instead of the sampler.
+  - `PluginSlot` owns a live instance, prepares it for the engine's sample rate
+    and block size, and processes it inside the channel strip.
+  - Instruments make the strip generate its own input, so the dry track signal is
+    never mixed in underneath them.
+  - Plugin state (the full chunk) is captured into the project on save and
+    restored on load, so a project reopens with the same plugin settings.
+  - Mixer insert menu: *Plugin...* opens a searchable chooser, *Open plugin
+    window* shows the plugin's own editor.
+  - A plugin that cannot be found reports a message and leaves the rest of the
+    project playing rather than breaking the session.
+- `PluginManager::scanNow()` and explicit extra search folders, so a plugin can be
+  scanned synchronously (used by the chooser's Rescan button and by the tests).
+- Two real VST3 test plugins (`NUX Test Gain`, `NUX Test Tone`) built from JUCE and
+  used by the test suite to verify hosting against actual plugin binaries.
 - **Audio clip playback.** Audio clips are decoded into cached stereo sample
   buffers and streamed in sync with the transport, including looped retriggering.
 - **Audio import**: drag and drop a WAV/AIFF/FLAC/Ogg/MP3 file onto a track lane,
@@ -21,6 +38,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - GitHub Actions CI for Windows (MSVC) and Linux (GCC).
 
 ### Fixed
+- Plugin instances are never destroyed while an audio block could still be using
+  them: they are swapped out with the device stopped and then freed through a
+  short grace-period retirement queue.
 - WAV export no longer applies live looping, so the render tail is silent instead
   of repeating the pattern.
 - Loop retriggering of audio clips: a clip that starts at step 0 now plays again
@@ -47,6 +67,23 @@ First working foundation. **Not a finished DAW** - see `TODO-LIST.md` for the
 honest list of what is still missing.
 
 ### Added
+- **VST3 plugins now run in the audio path.** An insert slot can hold a hosted
+  plugin instead of a built-in effect, and a track can be played by a hosted
+  instrument instead of the sampler.
+  - `PluginSlot` owns a live instance, prepares it for the engine's sample rate
+    and block size, and processes it inside the channel strip.
+  - Instruments make the strip generate its own input, so the dry track signal is
+    never mixed in underneath them.
+  - Plugin state (the full chunk) is captured into the project on save and
+    restored on load, so a project reopens with the same plugin settings.
+  - Mixer insert menu: *Plugin...* opens a searchable chooser, *Open plugin
+    window* shows the plugin's own editor.
+  - A plugin that cannot be found reports a message and leaves the rest of the
+    project playing rather than breaking the session.
+- `PluginManager::scanNow()` and explicit extra search folders, so a plugin can be
+  scanned synchronously (used by the chooser's Rescan button and by the tests).
+- Two real VST3 test plugins (`NUX Test Gain`, `NUX Test Tone`) built from JUCE and
+  used by the test suite to verify hosting against actual plugin binaries.
 - JUCE 9.0.5 (pinned submodule) + CMake build targeting Visual Studio 2022.
 - Audio engine: device management (WASAPI / DirectSound / ASIO where installed),
   stereo output, MIDI input, block-based rendering with per-track MIDI.

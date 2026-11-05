@@ -1,4 +1,5 @@
 #include "MixerView.h"
+#include "PluginPicker.h"
 
 namespace nux
 {
@@ -217,6 +218,16 @@ juce::String ChannelStripComponent::describeInsert (const InsertSlot& slot) cons
     if (slot.type == InsertType::none)
         return "+ INS";
 
+    if (slot.type == InsertType::plugin)
+    {
+        auto name = slot.plugin.name.isNotEmpty() ? slot.plugin.name : juce::String ("PLUGIN");
+
+        if (name.length() > 12)
+            name = name.substring (0, 11) + juce::String::charToString ((juce::juce_wchar) 0x2026);
+
+        return slot.bypassed ? name + " (off)" : name;
+    }
+
     juce::String name;
 
     switch (slot.type)
@@ -236,6 +247,23 @@ void ChannelStripComponent::showInsertMenu (int slotIndex)
 {
     juce::PopupMenu menu;
     menu.addSectionHeader ("Insert " + juce::String (slotIndex + 1));
+    menu.addItem (7, "Plugin...");
+
+    const auto isPluginSlot = [this, slotIndex]
+    {
+        auto& state = document.getState();
+
+        if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
+            return state.tracks[(size_t) index].inserts[(size_t) slotIndex].type == InsertType::plugin;
+
+        if (kind == Kind::bus && juce::isPositiveAndBelow (slotIndex, constants::maxBusInserts))
+            return state.buses[(size_t) index].inserts[(size_t) slotIndex].type == InsertType::plugin;
+
+        return state.master.inserts[(size_t) slotIndex].type == InsertType::plugin;
+    }();
+
+    menu.addItem (8, "Open plugin window", isPluginSlot);
+    menu.addSeparator();
     menu.addItem (1, "Equaliser");
     menu.addItem (2, "Compressor");
     menu.addItem (3, "Delay");
@@ -260,6 +288,90 @@ void ChannelStripComponent::showInsertMenu (int slotIndex)
         else
             slot = &state.master.inserts[(size_t) slotIndex];
 
+        if (result == 7)
+        {
+            // Load a plugin into this slot. The description is stored in the project
+            // first, then the engine instantiates it from there, so the model stays
+            // the single source of truth.
+            const auto kindCopy = kind;
+            const auto indexCopy = index;
+            const auto slotCopy = slotIndex;
+            auto* enginePtr = &engine;
+            auto* documentPtr = &document;
+            auto* self = this;
+
+            auto* manager = engine.getPluginManager();
+            jassert (manager != nullptr);
+
+            if (manager == nullptr)
+                return;
+
+            showPluginPicker (*manager,
+                              false,
+                              [enginePtr, documentPtr, self, kindCopy, indexCopy, slotCopy]
+                              (const juce::PluginDescription& description)
+            {
+                auto& state = documentPtr->getState();
+                InsertSlot* modelSlot = nullptr;
+
+                if (kindCopy == Kind::track && juce::isPositiveAndBelow (indexCopy, (int) state.tracks.size()))
+                    modelSlot = &state.tracks[(size_t) indexCopy].inserts[(size_t) slotCopy];
+                else if (kindCopy == Kind::bus && juce::isPositiveAndBelow (slotCopy, constants::maxBusInserts))
+                    modelSlot = &state.buses[(size_t) indexCopy].inserts[(size_t) slotCopy];
+                else
+                    modelSlot = &state.master.inserts[(size_t) slotCopy];
+
+                PluginReference reference;
+                reference.name         = description.name;
+                reference.manufacturer = description.manufacturerName;
+                reference.format       = description.pluginFormatName;
+                reference.isInstrument = description.isInstrument;
+
+                if (auto xml = description.createXml())
+                    reference.descriptionXml = xml->toString (juce::XmlElement::TextFormat().singleLine());
+
+                reference.stateSaved = false;
+
+                modelSlot->type = InsertType::plugin;
+                modelSlot->bypassed = false;
+                modelSlot->plugin = reference;
+                modelSlot->pluginStateBase64.clear();
+
+                const auto stripKind = kindCopy == Kind::track ? AudioEngine::StripKind::track
+                                     : kindCopy == Kind::bus   ? AudioEngine::StripKind::bus
+                                                               : AudioEngine::StripKind::master;
+
+                const auto error = enginePtr->loadInsertPlugin (stripKind, indexCopy, slotCopy);
+
+                enginePtr->syncMixerFromState();
+                documentPtr->markDirty();
+                self->syncFromState();
+
+                if (self->onEdited)
+                    self->onEdited();
+
+                if (error.isNotEmpty())
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                            "Could not load " + description.name,
+                                                            error);
+            });
+
+            return;
+        }
+
+        if (result == 8)
+        {
+            const auto stripKind = kind == Kind::track ? AudioEngine::StripKind::track
+                                 : kind == Kind::bus   ? AudioEngine::StripKind::bus
+                                                       : AudioEngine::StripKind::master;
+
+            if (auto* plugin = engine.getInsertPluginSlot (stripKind, index, slotIndex))
+                if (auto* window = PluginEditorWindow::createAndShow (*plugin))
+                    juce::ignoreUnused (window);
+
+            return;
+        }
+
         switch (result)
         {
             case 1: slot->type = InsertType::eq; slot->bypassed = false; slot->p1 = 0.0f; slot->p2 = 1000.0f; slot->p3 = 0.0f; break;
@@ -267,7 +379,16 @@ void ChannelStripComponent::showInsertMenu (int slotIndex)
             case 3: slot->type = InsertType::delay; slot->bypassed = false; slot->p1 = 350.0f; slot->p2 = 0.35f; slot->p3 = 0.25f; break;
             case 4: slot->type = InsertType::reverb; slot->bypassed = false; slot->p1 = 0.7f; slot->p2 = 0.45f; slot->p3 = 0.22f; break;
             case 5: slot->bypassed = ! slot->bypassed; break;
-            case 6: *slot = InsertSlot {}; break;
+            case 6:
+            {
+                const auto stripKind = kind == Kind::track ? AudioEngine::StripKind::track
+                                     : kind == Kind::bus   ? AudioEngine::StripKind::bus
+                                                           : AudioEngine::StripKind::master;
+
+                engine.unloadInsertPlugin (stripKind, index, slotIndex);
+                *slot = InsertSlot {};
+                break;
+            }
             default: return;
         }
 

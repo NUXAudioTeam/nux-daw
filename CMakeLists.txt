@@ -53,6 +53,7 @@ target_sources(NUX PRIVATE
     src/nux_ui/MixerView.cpp
     src/nux_ui/PianoRollView.cpp
     src/nux_ui/PluginPanel.cpp
+    src/nux_ui/PluginPicker.cpp
     src/nux_ui/AudioSettingsPanel.cpp
     src/nux_ui/TransportBar.cpp
     src/nux_ui/Widgets.cpp
@@ -63,6 +64,8 @@ target_sources(NUX PRIVATE
     src/nux_engine/ChannelStrip.cpp
     src/nux_engine/Synth.cpp
     src/nux_engine/PluginManager.cpp
+    src/nux_engine/PluginSlot.cpp
+    src/nux_engine/PluginRetirementQueue.cpp
     src/nux_core/ProjectDocument.cpp
     src/nux_core/ProjectSerializer.cpp
     src/nux_core/TrackModel.cpp)

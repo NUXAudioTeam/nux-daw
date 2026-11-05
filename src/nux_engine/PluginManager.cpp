@@ -25,6 +25,9 @@ juce::FileSearchPath PluginManager::getSearchPaths() const
 {
     juce::FileSearchPath paths;
 
+    // Anything the user (or a test) added explicitly is scanned first.
+    paths.addPath (extraSearchPaths);
+
     // Per-user VST3 folders used by every major Windows DAW, plus the system folder.
     const auto appData = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory);
     const auto commonAppData = juce::File::getSpecialLocation (juce::File::commonApplicationDataDirectory);
@@ -181,6 +184,64 @@ void PluginManager::saveCache()
 
     if (auto xml = knownList.createXml())
         xml->writeTo (cache);
+}
+
+void PluginManager::addSearchPaths (const juce::FileSearchPath& folders)
+{
+    for (int i = 0; i < folders.getNumPaths(); ++i)
+    {
+        const auto& path = folders[i];
+        bool alreadyThere = false;
+
+        for (int j = 0; j < extraSearchPaths.getNumPaths(); ++j)
+            if (extraSearchPaths[j] == path)
+                alreadyThere = true;
+
+        if (! alreadyThere)
+            extraSearchPaths.add (path);
+    }
+}
+
+int PluginManager::scanNow (const juce::FileSearchPath& folders, juce::StringArray& errors)
+{
+    errors.clear();
+
+    juce::Array<juce::AudioPluginFormat*> formatsToScan;
+
+    for (int i = 0; i < formatManager.getNumFormats(); ++i)
+        if (auto* format = formatManager.getFormat (i))
+            if (format->getName().containsIgnoreCase ("VST3"))
+                formatsToScan.add (format);
+
+    for (auto* format : formatsToScan)
+    {
+        juce::PluginDirectoryScanner scanner (knownList, *format, folders, true, {}, false);
+
+        juce::String pluginBeingScanned;
+
+        while (scanner.scanNextFile (true, pluginBeingScanned))
+        {
+            {
+                const juce::ScopedLock lock (scanFileLock);
+                currentScanFile = pluginBeingScanned;
+            }
+
+            scanProgress.store (scanner.getProgress());
+        }
+
+        errors.addArray (scanner.getFailedFiles());
+    }
+
+    {
+        const juce::ScopedLock lock (scanFileLock);
+        currentScanFile.clear();
+    }
+
+    rebuildInfoList();
+    saveCache();
+    scanProgress.store (1.0f);
+
+    return (int) plugins.size();
 }
 
 std::unique_ptr<juce::AudioPluginInstance> PluginManager::createInstance (const juce::PluginDescription& description,

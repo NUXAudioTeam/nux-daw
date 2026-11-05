@@ -170,6 +170,61 @@ public:
             temporary.deleteFile();
             temporary.getParentDirectory().deleteRecursively();
         }
+        beginTest ("A plugin insert and hosted instrument survive a save and load");
+        {
+            auto project = ProjectState::createDefault();
+            project.tracks[0].inserts[1].type = InsertType::plugin;
+            project.tracks[0].inserts[1].bypassed = false;
+            project.tracks[0].inserts[1].plugin.name = "Super Comp";
+            project.tracks[0].inserts[1].plugin.manufacturer = "NUX Labs";
+            project.tracks[0].inserts[1].plugin.format = "VST3";
+            project.tracks[0].inserts[1].plugin.descriptionXml = "<PLUGIN name=\"Super Comp\" uniqueId=\"42\"/>";
+            project.tracks[0].inserts[1].plugin.stateSaved = true;
+            project.tracks[0].inserts[1].pluginStateBase64 = "c3RhdGU=";
+
+            // Track 1 is a sampler track, which is where a hosted instrument belongs.
+            project.tracks[1].instrumentPlugin.name = "Tone Generator";
+            project.tracks[1].instrumentPlugin.format = "VST3";
+            project.tracks[1].instrumentPlugin.isInstrument = true;
+            project.tracks[1].instrumentPlugin.descriptionXml = "<PLUGIN name=\"Tone Generator\" isInstrument=\"1\"/>";
+            project.tracks[1].instrumentStateBase64 = "aW5zdA==";
+
+            project.master.inserts[3].type = InsertType::plugin;
+            project.master.inserts[3].plugin.name = "Limiter XL";
+            project.master.inserts[3].plugin.descriptionXml = "<PLUGIN name=\"Limiter XL\"/>";
+
+            const auto text = serializer::toJson (project);
+
+            ProjectState loaded;
+            juce::String error;
+            expect (serializer::fromJson (text, loaded, error), "The project failed to load: " + error);
+
+            expect (loaded.tracks[0].inserts[1].type == InsertType::plugin,
+                    "A plugin insert must keep its type");
+            expectEquals (loaded.tracks[0].inserts[1].plugin.name, juce::String ("Super Comp"));
+            expectEquals (loaded.tracks[0].inserts[1].plugin.format, juce::String ("VST3"));
+            expectEquals (loaded.tracks[0].inserts[1].plugin.descriptionXml,
+                          juce::String ("<PLUGIN name=\"Super Comp\" uniqueId=\"42\"/>"));
+            expect (loaded.tracks[0].inserts[1].plugin.stateSaved, "The plugin state flag must survive");
+            expectEquals (loaded.tracks[0].inserts[1].pluginStateBase64, juce::String ("c3RhdGU="));
+
+            expect (loaded.tracks[1].usesPluginInstrument(), "A hosted instrument must survive a load");
+            expectEquals (loaded.tracks[1].instrumentPlugin.name, juce::String ("Tone Generator"));
+            expectEquals (loaded.tracks[1].instrumentStateBase64, juce::String ("aW5zdA=="));
+
+            // An audio track is played by its clips, never by a VST3 instrument.
+            expect (! loaded.tracks[2].usesPluginInstrument(),
+                    "An audio track must not claim a hosted instrument");
+
+            expect (loaded.master.inserts[3].type == InsertType::plugin, "A master plugin insert must survive");
+            expectEquals (loaded.master.inserts[3].plugin.name, juce::String ("Limiter XL"));
+
+            // Track 0 has no plugin anywhere: its inserts and instrument stay built-in.
+            expect (loaded.tracks[0].inserts[0].type != InsertType::plugin,
+                    "A track with built-in inserts must not gain a plugin");
+            expect (! loaded.tracks[0].usesPluginInstrument(),
+                    "A track without a hosted instrument must not report one");
+        }
     }
 };
 

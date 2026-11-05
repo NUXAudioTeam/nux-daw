@@ -6,9 +6,10 @@ A digital audio workstation for Windows, written in C++20 with
 ![NUX - Main workspace](docs/screenshots/main.png)
 
 > **Status: 0.4.0 in progress.** NUX plays, sequences, mixes, plays back audio
-> clips, hosts plugin editors, saves projects and exports WAV. It is **not** a
-> finished DAW yet: plugin audio is not in the signal chain, and there is no
-> undo/redo or automation. `TODO-LIST.md` tracks the honest state of every feature.
+> clips, hosts VST3 effects *and* instruments in the audio path, saves projects
+> (including plugin state) and exports WAV. It is **not** a finished DAW yet:
+> there is no undo/redo or automation. `TODO-LIST.md` tracks the honest state of
+> every feature.
 
 ---
 
@@ -23,7 +24,9 @@ A digital audio workstation for Windows, written in C++20 with
 | Mixer: 32 tracks, 8 buses with delay/reverb sends, master limiter | ✅ |
 | Step sequencer + transport (tempo, loop, play / stop / record) | ✅ |
 | Piano roll note editing | ✅ |
-| VST3 scanning and plugin editor windows | ✅ (audio routing still pending) |
+| VST3 hosting **in the signal chain** (effects and instruments) | ✅ |
+| Plugin parameter state saved in the project | ✅ |
+| Plugin editor windows, plugin chooser, per-slot bypass | ✅ |
 | `.nux` project save / load, 24-bit WAV export | ✅ |
 | **Audio clip playback, import and drag-and-drop** | ✅ |
 | Undo / redo, automation | ❌ not yet |
@@ -98,6 +101,10 @@ ctest --test-dir build --output-on-failure
 - **Piano Roll** – click to add a note, drag to move, right-click to delete,
   `Shift`-drag to change pitch.
 - **Plugins** – scan the standard VST3 folders, then open a plugin editor.
+- **Insert slots** – click an insert button on any mixer strip and choose
+  *Plugin...* to load a VST3 into that channel, *Open plugin window* to show its
+  editor, or a built-in effect. Hosted plugins process audio in place of the
+  built-in slot, and an instrument plugin replaces the track's sampler.
 - **Master** – master gain, limiter, export length and WAV export.
 
 Projects are plain JSON with the `.nux` extension; the format is versioned and

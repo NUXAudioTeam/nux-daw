@@ -65,6 +65,19 @@ public:
                 if (auto* main = mainWindow->getMainComponent())
                     main->loadDemoProjectWithAudioClip (resolvePath (args[fileIndex]));
 
+            const auto pluginIndex = args.indexOf ("--plugin");
+
+            if (pluginIndex > 0 && pluginIndex + 2 < args.size() && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                {
+                    const auto message = main->loadPluginIntoDemoTrack (0,
+                                                                        resolvePath (args[pluginIndex + 1]),
+                                                                        args[pluginIndex + 2].unquoted());
+                    juce::Logger::writeToLog ("Plugin load: " + message);
+                }
+            }
+
             const auto shotIndex = args.indexOf ("--screenshot");
 
             if (shotIndex > 0 && shotIndex + 1 < args.size())
