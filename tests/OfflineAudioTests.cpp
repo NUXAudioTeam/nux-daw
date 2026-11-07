@@ -16,6 +16,7 @@
 #include "../src/nux_engine/TestTone.h"
 #include "../src/nux_engine/InputRecorder.h"
 #include "../src/nux_core/TrackModel.h"
+#include <memory>
 
 namespace nux::tests
 {
@@ -57,7 +58,8 @@ public:
         {
             for (const auto rate : { 44100.0, 48000.0, 88200.0, 96000.0 })
             {
-                AudioEngine engine;
+                auto enginePtr = std::make_unique<AudioEngine>();
+                auto& engine = *enginePtr;
                 prepareEngine (engine, rate, 512);
 
                 engine.setTestToneEnabled (true);
@@ -85,7 +87,8 @@ public:
 
         beginTest ("The tone level in dBFS matches the requested level");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             prepareEngine (engine, 44100.0, 512);
             engine.setTestToneEnabled (true);
             engine.setTestToneLevel (1.0f);
@@ -105,7 +108,8 @@ public:
         {
             for (const auto level : { 0.25f, 0.5f, 0.75f, 1.0f })
             {
-                AudioEngine engine;
+                auto enginePtr = std::make_unique<AudioEngine>();
+                auto& engine = *enginePtr;
                 prepareEngine (engine, 44100.0, 512);
                 engine.setTestToneEnabled (true);
                 engine.setTestToneLevel (level);
@@ -124,7 +128,8 @@ public:
 
         beginTest ("Both channels carry the same tone");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             prepareEngine (engine, 48000.0, 256);
             engine.setTestToneEnabled (true);
 
@@ -142,7 +147,8 @@ public:
 
         beginTest ("Turning the tone on and off produces ramps, not clicks");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             prepareEngine (engine, 44100.0, 256);
 
             // Silence, then on, then off, all rendered into one buffer.
@@ -192,7 +198,8 @@ public:
         {
             for (const auto blockSize : { 32, 64, 128, 256, 512, 1024, 2048 })
             {
-                AudioEngine engine;
+                auto enginePtr = std::make_unique<AudioEngine>();
+                auto& engine = *enginePtr;
                 prepareEngine (engine, 44100.0, blockSize);
                 engine.setTestToneEnabled (true);
 
@@ -224,7 +231,8 @@ public:
 
         beginTest ("A note plays through the built-in synth and lands in the mix");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             prepareEngine (engine, 44100.0, 512);
 
             // Track 0 is a sampler track with the built-in synth.
@@ -241,7 +249,8 @@ public:
 
         beginTest ("Mute silences a track and solo isolates it");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             prepareEngine (engine, 44100.0, 512);
 
             engine.triggerPreviewNote (0, 60, 0.9f);
@@ -277,7 +286,8 @@ public:
             // Program material, not the test tone: the tone is added after the master
             // chain on purpose, so that a fader at -inf cannot make a working device
             // look broken. The fader is tested with a real track instead.
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             prepareEngine (engine, 44100.0, 512);
 
             // Measure a settled tail: the fader is smoothed, so the first blocks still
@@ -316,7 +326,8 @@ public:
         {
             // This is a deliberate design rule, so it is pinned by a test: the tone is a
             // device test and must be heard even in an otherwise silent project.
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             prepareEngine (engine, 44100.0, 512);
             engine.setTestToneEnabled (true);
 
@@ -341,7 +352,8 @@ public:
         {
             auto render = [] (juce::AudioBuffer<float>& destination)
             {
-                AudioEngine engine;
+                auto enginePtr = std::make_unique<AudioEngine>();
+                auto& engine = *enginePtr;
                 ProjectState localProject = ProjectState::createDefault();
                 engine.setProjectState (&localProject);
                 engine.prepareForOfflineRendering (44100.0, 512, 2);
@@ -382,7 +394,8 @@ public:
             // Preparation at a new rate must not produce garbage on the first block.
             for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
             {
-                AudioEngine engine;
+                auto enginePtr = std::make_unique<AudioEngine>();
+                auto& engine = *enginePtr;
                 prepareEngine (engine, rate, 256);
                 engine.setTestToneEnabled (true);
 

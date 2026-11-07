@@ -11,6 +11,7 @@
 #include "../src/nux_core/ProjectDocument.h"
 
 #include <cmath>
+#include <memory>
 
 namespace nux::tests
 {
@@ -156,7 +157,8 @@ public:
 
         beginTest ("A stopped test tone contributes nothing to the mix");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             ProjectState project = ProjectState::createDefault();
             engine.setProjectState (&project);
             engine.prepareForOfflineRendering (44100.0, 512, 2);
@@ -198,7 +200,8 @@ public:
 
         beginTest ("The output meter follows what was actually sent");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             ProjectState project = ProjectState::createDefault();
             engine.setProjectState (&project);
             engine.prepareForOfflineRendering (44100.0, 512, 2);
@@ -233,7 +236,8 @@ public:
 
         beginTest ("The engine reports a lost device instead of pretending to play");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             ProjectState project = ProjectState::createDefault();
             engine.setProjectState (&project);
 

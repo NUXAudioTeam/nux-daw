@@ -7,6 +7,7 @@
 #include <juce_events/juce_events.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "../src/nux_engine/AudioEngine.h"
+#include <memory>
 
 namespace nux
 {
@@ -29,7 +30,8 @@ public:
             project.tracks[0].inserts[0].p2 = 1200.0f;
             project.tracks[0].inserts[0].p3 = 2.0f;
 
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             engine.setProjectState (&project);
 
             // The engine only needs an audio device for live playback; for an
@@ -110,7 +112,8 @@ public:
                 for (auto& step : track.steps)
                     step.enabled = false;
 
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             engine.setProjectState (&project);
             engine.prepareForOfflineRendering (44100.0, 512, 2);
 
@@ -184,7 +187,8 @@ public:
             clip.lengthSteps = 16;   // one bar at 120 BPM = 2 s, the clip is 1 s
             project.tracks[2].audioClips.push_back (clip);
 
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             engine.setProjectState (&project);
             engine.setMediaRootDirectory (projectFolder);
             engine.prepareForOfflineRendering (44100.0, 512, 2);
@@ -242,7 +246,8 @@ public:
         beginTest ("Transport advances and loops");
         {
             ProjectState project = ProjectState::createDefault();
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             engine.setProjectState (&project);
             engine.prepareForOfflineRendering (44100.0, 512, 2);
 
@@ -276,7 +281,8 @@ public:
             for (int i = 0; i < 16; i += 2)
                 project.tracks[1].steps[(size_t) i] = { true, 0.9f };
 
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             engine.setProjectState (&project);
             engine.prepareForOfflineRendering (44100.0, 512, 2);
 

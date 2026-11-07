@@ -4,6 +4,7 @@
    prove the reporting cannot lie: a run that did not happen must never be reported as a
    pass, and simulated evidence must never be labelled as hardware. */
 #include "../src/nux_engine/RoundTrip.h"
+#include "../src/nux_engine/AudioEngine.h"
 #include "../src/nux_engine/AudioDeviceProbe.h"
 
 namespace nux::tests
@@ -178,6 +179,28 @@ public:
                                              + juce::String (result.gainDb, 4) + " dB in a "
                                              + "sample-for-sample copy");
             }
+        }
+
+        beginTest ("No engine object is too large for a 1 MB Windows stack");
+        {
+            // This is the guard for the bug that made Windows CI segfault before its
+            // first test could run: sizeof(AudioEngine) is about 424 KB, and the default
+            // Windows stack is 1 MB, so a single stack-allocated engine overflowed it.
+            // Linux never showed it, because its default stack is 8 MB.
+            //
+            // A unit test cannot inspect how other code allocates, so this pins the size
+            // instead: if the engine grows into something that must not sit on a stack,
+            // the number here tells the next person immediately.
+            constexpr auto engineBytes = sizeof (nux::AudioEngine);
+            constexpr auto windowsDefaultStack = 1024 * 1024;
+
+            logMessage ("sizeof(AudioEngine) = " + juce::String ((int) engineBytes)
+                        + " bytes, Windows default stack = " + juce::String (windowsDefaultStack));
+
+            expect (engineBytes < windowsDefaultStack / 2,
+                    "sizeof(AudioEngine) is " + juce::String ((int) (engineBytes / 1024))
+                      + " KB, which is too large to put on a 1 MB Windows stack next to "
+                      "anything else. Construct it on the heap.");
         }
 
         beginTest ("A device round trip never reports hardware it did not use");

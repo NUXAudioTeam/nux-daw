@@ -13,6 +13,7 @@
 #include "../src/nux_core/ProjectSerializer.h"
 
 #include <cmath>
+#include <memory>
 
 namespace nux::tests
 {
@@ -292,7 +293,8 @@ public:
                                     "uniqueId=\"1234567890\" isInstrument=\"0\" numInputs=\"2\" numOutputs=\"2\"/>";
             broken.stateSaved = false;
 
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             ProjectState project = ProjectState::createDefault();
             engine.setProjectState (&project);
             engine.setPluginManager (&manager);
@@ -315,7 +317,8 @@ public:
 
         beginTest ("A hosted instrument plays the notes sent to its track");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             ProjectState project = ProjectState::createDefault();
             engine.setProjectState (&project);
             engine.setPluginManager (&manager);
