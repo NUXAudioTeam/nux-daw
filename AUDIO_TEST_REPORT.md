@@ -27,6 +27,7 @@ was ever produced or captured by a real device during this run.
 | Physical hardware output | ❌ **NOT PERFORMED** - no device on this machine |
 | Physical hardware input (microphone) | ❌ **NOT PERFORMED** - no device on this machine |
 | Virtual audio device (VB-CABLE) | ❌ **NOT PERFORMED** - not installed |
+| Windows device enumeration (real Windows, no sound card) | ✅ **captured from CI** - see section 5b |
 | ASIO driver | ❌ **NOT PERFORMED** - not installed, Linux build |
 | WASAPI loopback capture | ⚠️ **NOT SUPPORTED** - see section 7 |
 
@@ -132,6 +133,44 @@ Checked: ALSA (This driver reported no devices.).
 Install or enable a sound device, or install a virtual cable such as VB-CABLE
 to route audio without hardware.
 Physical and virtual device tests were therefore NOT performed.
+```
+
+---
+
+## 5b. What Windows actually reports, from CI (verbatim)
+
+The Windows CI runner has no sound card, but it is a real Windows machine, so its device
+enumeration is real evidence - just not evidence of working audio. This is the output of
+`NUX DAW --device-report` on `windows-2022`, Release build (run `42356228869`):
+
+```
+note: ASIO is compiled in but no ASIO driver is installed.
+ASIO compiled in: yes
+ASIO driver usable: no
+Virtual cable present: no
+Summary: DirectSound: 1 output, 1 input device(s).
+Engine status: Error opening Primary Sound Driver: "No driver"
+```
+
+Two things worth reading carefully here.
+
+**The device list is not the truth.** DirectSound advertises `1 output, 1 input` on a
+machine that has no sound card at all, because it reports a "Primary Sound Driver" that
+cannot be opened. NUX then tried to open it and failed with `No driver`. That is the
+correct behaviour: an enumerated device is a claim, and only a successful open is
+evidence. This is exactly the same distinction the `Verification` ladder in step B
+enforces, and it is why "the device list showed my interface" is never written down as
+"the interface works".
+
+**ASIO is compiled in and has never run.** `ASIO compiled in: yes` is proof the backend
+reaches the binary. `ASIO driver usable: no` is the honest answer, and it stays `no`
+until a real driver is opened on real hardware - installing a driver is not testing it.
+
+For comparison, the same flag on the CI Linux runner:
+
+```
+[ALSA] available = no, outputs = 0
+ASIO compiled in: no
 ```
 
 ---
