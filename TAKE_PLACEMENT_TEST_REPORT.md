@@ -104,11 +104,24 @@ take is never shorter.
 
 ---
 
-## 5. CI
+## 5. CI — actual results
 
-Windows Debug, Windows Release and Linux Release run the same suite as before, plus the new
-`NUX_take_placement` ctest entry. The Linux ThreadSanitizer job covers the new groups too.
-Exact results are recorded in the pull request once the runs finish — not predicted here.
+Run [`42379016406`](https://github.com/hirushanethsara323-jpg/nux-daw/actions/runs/42379016406)
+on commit `314889f`, branch `feature/take-placement`:
+
+| Job | Result | Evidence from the log |
+|---|---|---|
+| Linux (GCC, Release) | ✅ success | `100% tests passed out of 17` |
+| Linux (GCC, ThreadSanitizer) | ✅ success | 16 groups ran, all `NUX take placement` tests passed, `All NUX tests passed.`, **0 data races** |
+| Windows (MSVC, Debug + leak detector) | ✅ success | — |
+| Windows (MSVC, Release) | ✅ success | — |
+
+The only `WARNING: ThreadSanitizer` match in the TSan log is the workflow's own `grep`
+statement being echoed; no sanitizer report was produced.
+
+**What this does not prove.** A clean TSan run means no race was *observed* on the paths the
+tests exercised. It does not mean the program is race-free, and it says nothing about
+anything the tests never touch — real device callbacks above all.
 
 ---
 
