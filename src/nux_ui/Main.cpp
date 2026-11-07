@@ -36,6 +36,14 @@ public:
         return dynamic_cast<MainComponent*> (getContentComponent());
     }
 
+    juce::Component* getAudioSettingsWindow() const
+    {
+        if (auto* main = getMainComponent())
+            return main->getAudioSettingsComponentForDemo();
+
+        return nullptr;
+    }
+
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NuxMainWindow)
 };
@@ -72,7 +80,8 @@ public:
                             || args.contains ("--insert-editor")
                             || args.contains ("--undo-self-test")
                             || args.contains ("--record-self-test")
-                            || args.contains ("--instrument-self-test");
+                            || args.contains ("--instrument-self-test")
+                            || args.contains ("--audio-settings");
 
         if (wantsDemo)
         {
@@ -118,6 +127,16 @@ public:
                 }
             }
 
+            if (args.contains ("--audio-settings") && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                {
+                    main->showAudioSettingsForDemo (args.contains ("--test-tone"));
+                    report ("Audio settings: " + juce::String (args.contains ("--test-tone")
+                                                                 ? "test tone on" : "opened"));
+                }
+            }
+
             const auto recordIndex = args.indexOf ("--record-self-test");
 
             if (recordIndex >= 0 && recordIndex + 2 < args.size() && mainWindow != nullptr)
@@ -153,11 +172,24 @@ public:
             if (shotIndex >= 0 && shotIndex + 1 < args.size())
             {
                 const auto path = args[shotIndex + 1];
+                const auto shootAudioSettings = args.contains ("--audio-settings");
 
-                juce::Timer::callAfterDelay (2500, [this, path]
+                juce::Timer::callAfterDelay (2500, [this, path, shootAudioSettings]
                 {
                     if (mainWindow != nullptr)
-                        writeWindowScreenshot (*mainWindow, resolvePath (path));
+                        // When the audio settings window is on screen it is the subject,
+                        // not the main window behind it.
+                        if (shootAudioSettings)
+                        {
+                            if (auto* dialog = mainWindow->getAudioSettingsWindow())
+                                writeWindowScreenshot (*dialog, resolvePath (path));
+                            else
+                                writeWindowScreenshot (*mainWindow, resolvePath (path));
+                        }
+                        else
+                        {
+                            writeWindowScreenshot (*mainWindow, resolvePath (path));
+                        }
 
                     juce::JUCEApplication::quit();
                 });

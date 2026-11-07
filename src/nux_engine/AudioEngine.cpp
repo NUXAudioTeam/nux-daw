@@ -65,8 +65,16 @@ void AudioEngine::shutdownAudio()
     graphPrepared = false;
 }
 
+juce::String AudioEngine::getLastDeviceError() const
+{
+    return lastDeviceError;
+}
+
 juce::String AudioEngine::getAudioStatusMessage() const
 {
+    if (deviceLost.load (std::memory_order_acquire) && audioReady)
+        return "Device disconnected - reopening...";
+
     if (! audioReady)
         return lastDeviceError.isNotEmpty() ? lastDeviceError : "No audio device open";
 
@@ -469,6 +477,7 @@ void AudioEngine::prepare (double newSampleRate, int newBlockSize)
     masterBus.prepareMaster (sampleRate, blockSize);
     preparePluginsForGraph();
     inputRecorder.prepare (sampleRate, blockSize, 2);
+    testTone.prepare (sampleRate);
     recordScratch.setSize (2, blockSize, false, true, true);
 
     scopeDecimation = juce::jmax (1, (int) std::round (sampleRate / 22050.0));
@@ -513,7 +522,45 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
 void AudioEngine::audioDeviceStopped()
 {
+    // The device went away (unplugged interface, driver reset). Keep the flags honest
+    // so the UI can say so instead of looking like a silent bug, and stop anything
+    // that would otherwise be left running.
     graphPrepared = false;
+    audioReady = false;
+    deviceLost.store (true, std::memory_order_release);
+
+    testTone.reset();
+}
+
+void AudioEngine::audioDeviceError (const juce::String& errorMessage)
+{
+    lastDeviceError = errorMessage.isNotEmpty() ? errorMessage : juce::String ("The audio device reported an error.");
+    deviceLost.store (true, std::memory_order_release);
+}
+
+bool AudioEngine::tryReopenDevice()
+{
+    // Called from the UI timer when the device was lost: reopen and prepare again.
+    if (deviceManager.getCurrentAudioDevice() != nullptr && graphPrepared)
+    {
+        deviceLost.store (false, std::memory_order_release);
+        return true;
+    }
+
+    const auto error = deviceManager.initialise (2, 2, nullptr, true);
+    auto* device = deviceManager.getCurrentAudioDevice();   // non-const: getters are not const
+
+    if (device == nullptr)
+    {
+        lastDeviceError = error.isNotEmpty() ? error : juce::String ("No audio device is available.");
+        return false;
+    }
+
+    lastDeviceError.clear();
+    audioReady = true;
+    deviceLost.store (false, std::memory_order_release);
+    prepare (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
+    return true;
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
@@ -785,6 +832,20 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
         bus.processBus (masterBus);
 
     masterBus.renderMaster (output, nullptr);
+
+    // The test tone is added *after* the master chain so it is audible even when every
+    // track is muted, which is the whole point of a device test.
+    testTone.render (output, numSamples);
+
+    // Publish the peak of what actually went to the device, for the output meters.
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const auto index = juce::jmin (ch, output.getNumChannels() - 1);
+        const auto peak = index >= 0 ? output.getMagnitude (index, 0, numSamples) : 0.0f;
+        const auto previous = outputPeaks[(size_t) ch].load (std::memory_order_relaxed);
+        outputPeaks[(size_t) ch].store (juce::jmax (peak, previous * 0.88f), std::memory_order_relaxed);
+    }
+
     updateScope (output, numSamples);
 }
 
@@ -836,6 +897,21 @@ void AudioEngine::togglePlay()
         play();
 }
 
+void AudioEngine::setTestToneEnabled (bool shouldBeOn)
+{
+    if (! shouldBeOn)
+    {
+        testTone.setLevel (0.0f);
+        return;
+    }
+
+    // Turning the tone on must give an audible default rather than the bare minimum:
+    // the earlier code clamped the level *up* to 0.05 and then found it already above
+    // zero, so the tone came out almost inaudible.
+    if (testTone.getLevel() <= 0.0f)
+        testTone.setLevel (0.25f);
+}
+
 void AudioEngine::panic()
 {
     for (int i = 0; i < constants::maxTracks; ++i)
@@ -849,6 +925,11 @@ void AudioEngine::panic()
 
     masterBus.reset();
     for (auto& bus : buses) bus.reset();
+
+    // A panic must also stop the test tone, or "silence everything" would still hum.
+    testTone.reset();
+    for (auto& peak : outputPeaks)
+        peak.store (0.0f, std::memory_order_relaxed);
 }
 
 void AudioEngine::startRecording()

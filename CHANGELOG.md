@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Added
+- **Test tone.** A 440 Hz sine that proves audio reaches the selected output device.
+  It is generated on the audio thread with a 5 ms per-sample ramp (no click), added
+  after the master chain so it is audible even with every track muted, capped well
+  below 0 dBFS, and stopped by panic.
+- **Input and output level meters** in the audio settings panel, fed by atomics the
+  engine publishes each block. An input that never moves says "no input signal"
+  instead of looking like a working meter.
+- **Device-loss recovery.** `audioDeviceStopped()` / `audioDeviceError()` now mark the
+  engine honestly, the status line says "Device disconnected - reopening...", and
+  `tryReopenDevice()` reopens and re-prepares the graph from the panel's timer.
+- `--audio-settings [--test-tone]` headless hook, plus the panel screenshot.
+- `tests/AudioDeviceTests.cpp` (6 groups): tone frequency, no clipping, click-free
+  ramp, tone in the mix, meter behaviour, device-loss reporting.
+
+### Fixed
+- The audio settings panel still asked for **0 input channels**, so the selector could
+  never offer an input to record from.
+- `setTestToneEnabled()` clamped the level *up* to 0.05 and then decided it was already
+  audible, so the tone came out at -35 dB instead of the intended level.
+
 # Changelog
 
 All notable changes to NUX DAW are documented here.

@@ -24,6 +24,7 @@
 #include "AudioClipPlayer.h"
 #include "AudioClipStore.h"
 #include "InputRecorder.h"
+#include "TestTone.h"
 #include "ChannelStrip.h"
 #include "PluginManager.h"
 #include "PluginSlot.h"
@@ -62,6 +63,15 @@ public:
     /** Asks the current driver for a low latency setup: the highest sample rate it
         supports with a 256 sample buffer, falling back to whatever it will accept. */
     void applyPreferredDeviceSetup();
+
+    /** True when the device disappeared and NUX has not reopened it yet. */
+    bool isDeviceLost() const noexcept { return deviceLost.load (std::memory_order_acquire); }
+
+    /** Reopens the audio device after a disconnection. Returns true on success. */
+    bool tryReopenDevice();
+
+    /** The last device error, for the UI. */
+    juce::String getLastDeviceError() const;
 
     //==============================================================================
     Transport& getTransport() noexcept { return transport; }
@@ -197,6 +207,25 @@ public:
     bool hasAudioInput() const;
 
     //==============================================================================
+    // Test tone (proves audio reaches the device)
+
+    /** Starts / stops the 440 Hz test tone. The ramp keeps it click-free. */
+    void setTestToneEnabled (bool shouldBeOn);
+    bool isTestToneEnabled() const noexcept { return testTone.isActive(); }
+    void setTestToneLevel (float level) { testTone.setLevel (level); }
+    float getTestToneLevel() const noexcept { return testTone.getLevel(); }
+    void setTestToneFrequency (double hz) { testTone.setFrequency (hz); }
+
+    /** Output peak of what was actually sent to the device last block. */
+    float getOutputPeak (int channel) const noexcept
+    {
+        return outputPeaks[(size_t) juce::jlimit (0, 1, channel)].load (std::memory_order_relaxed);
+    }
+
+    /** Input level reported by the recorder (0 when not recording). */
+    float getInputPeak() const noexcept { return inputRecorder.getInputLevel(); }
+
+    //==============================================================================
     void play();
     void stop();
     void togglePlay();
@@ -243,6 +272,7 @@ public:
                                            const juce::AudioIODeviceCallbackContext& context) override;
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
+    void audioDeviceError (const juce::String& errorMessage) override;
     void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
 
 private:
@@ -292,7 +322,10 @@ private:
 
     AudioClipStore clipStore;
     InputRecorder inputRecorder;
+    TestToneGenerator testTone;
+    std::array<std::atomic<float>, 2> outputPeaks { { {0.0f}, {0.0f} } };
     std::atomic<int> armedTrackIndex { -1 };
+    std::atomic<bool> deviceLost { false };
     juce::File mediaRoot;
     std::array<std::vector<ClipSnapshot>, constants::maxTracks> clipSnapshots;
 

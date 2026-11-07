@@ -83,6 +83,13 @@ public:
         checks that the plugin really produced audio. */
     juce::String runInstrumentSelfTest (const juce::File& pluginFolder, const juce::String& pluginName,
                                         int trackIndex);
+
+    /** Opens the audio settings window for a screenshot / smoke test. */
+    void showAudioSettingsForDemo (bool startTestTone);
+
+    /** The audio settings panel, when the window is open. */
+    juce::Component* getAudioSettingsComponentForDemo() const;
+
     void toggleAudioSettings();
     void showAbout();
 

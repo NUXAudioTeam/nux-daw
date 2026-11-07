@@ -11,6 +11,7 @@ target_sources(NUXTests PRIVATE
     InsertParameterTests.cpp
     UndoTests.cpp
     RecordingTests.cpp
+    AudioDeviceTests.cpp
     ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/InsertParameters.cpp

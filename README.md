@@ -34,6 +34,8 @@ A digital audio workstation for Windows, written in C++20 with
 | Editable effect parameters (EQ, compressor, delay, reverb) | ✅ |
 | **Recording the audio input onto an armed track** | ✅ (verified with simulated input; see caveat below) |
 | **Choosing a hosted VST3 instrument from the track menu** | ✅ |
+| **440 Hz test tone + input/output meters in AUDIO settings** | ✅ |
+| Device disconnection detection and automatic reopen | ✅ |
 | Automation, MIDI learn | ❌ not yet |
 | ASIO, CPU metering, latency compensation, sidechain | ❌ not yet |
 

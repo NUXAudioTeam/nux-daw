@@ -1436,6 +1436,27 @@ void MainComponent::toggleAudioSettings()
     showAudioSettingsWindow();
 }
 
+void MainComponent::showAudioSettingsForDemo (bool startTestTone)
+{
+    showAudioSettingsWindow();
+
+    if (audioSettingsPanel == nullptr)
+        return;
+
+    audioSettingsPanel->refresh();
+
+    if (startTestTone)
+        engine.setTestToneEnabled (true);
+}
+
+juce::Component* MainComponent::getAudioSettingsComponentForDemo() const
+{
+    if (audioSettingsWindow != nullptr)
+        return audioSettingsWindow->getContentComponent();
+
+    return nullptr;
+}
+
 void MainComponent::showAudioSettingsWindow()
 {
     audioSettingsPanel = new AudioSettingsPanel (engine);
