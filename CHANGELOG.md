@@ -1,3 +1,42 @@
+## [Unreleased] - Virtual Audio Lab, step A (measurement maths)
+
+### Added
+- **Measurement engine** (`src/nux_engine/Measurements.{h,cpp}`): levels and AES17 clip
+  detection, Hann-FFT spectrum, AES17 THD / THD+N against a known fundamental, SNR,
+  stereo correlation / DC / crosstalk, 4x-oversampled true peak, BS.1770-4 gated loudness
+  with LRA, gain accuracy, sample-rate accuracy, and parabolic-interpolated frequency.
+- **Reference signals** (`src/nux_engine/TestSignals.{h,cpp}`): sine, square, triangle,
+  sawtooth, white and pink noise, DC, two tone, exponential sweep and impulse, each with
+  an analytically known RMS and each deterministic for a given seed.
+- **`tests/MeasurementTests.cpp`** (20 groups) of known-answer tests, so the maths is
+  checked against formulas rather than against whatever the engine happened to produce.
+- **`docs/AUDIO_MEASUREMENT_METHODS.md`** documenting every method, its standard, its
+  known-answer checks, and exactly what has *not* been verified.
+
+### Fixed
+- **Loudness read every measurement 0.691 LU low.** Each 400 ms block already carried the
+  BS.1770 `-0.691` offset; the averaging converted blocks back to power and then added it
+  again. The four non-full-scale reference cases still passed a loose 0.2 LU tolerance,
+  so only the full-scale case exposed it.
+- **K-weighting was an approximation, not the standard.** It used a generic
+  `makeHighShelf(1500 Hz, Q 0.7071, +4 dB)` and read a −20 dBFS stereo tone as
+  −20.73 LUFS. Now designed from the published pre-filter parameters
+  (`f0 = 1681.97 Hz`, `G = 3.9998 dB`, `Q = 0.70717`) and reads −20.00, which is what
+  ffmpeg / libebur128 reports for the same signal.
+- **`SpectrumResult::getMagnitudeAt()` did not interpolate** despite its header claiming
+  it did; it rounded to the nearest bin, which misread levels by up to 1.4 dB depending
+  on where a tone fell. Now uses parabolic interpolation.
+- **`measureCrosstalkDb()` returned an absolute level instead of a ratio**, reporting a
+  correct −60 dB leak as −69 dB. Now measured relative to the driven channel.
+- **Mono reference signals corrupted the heap.** The generator wrote channel 1
+  unconditionally, so any mono spec wrote past the end of the buffer. Silent in Release,
+  and it took the whole test run down with a segfault as soon as a mono case was added.
+
+### Changed
+- `NUXTests` takes `--list` and `--only=<group>` so a crash can be bisected to one group,
+  and writes unbuffered output so a crash leaves the running test's name in the CI log.
+  Windows CI previously reported nothing but "SegFault".
+
 ## [Unreleased] - CI coverage
 
 ### Added

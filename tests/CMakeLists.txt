@@ -14,6 +14,7 @@ target_sources(NUXTests PRIVATE
     AudioDeviceTests.cpp
     OfflineAudioTests.cpp
     DeviceProbeTests.cpp
+    MeasurementTests.cpp
     ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/InsertParameters.cpp
@@ -23,6 +24,8 @@ target_sources(NUXTests PRIVATE
     ../src/nux_engine/AudioClipStore.cpp
     ../src/nux_engine/InputRecorder.cpp
     ../src/nux_engine/AudioDeviceProbe.cpp
+    ../src/nux_engine/Measurements.cpp
+    ../src/nux_engine/TestSignals.cpp
     ../src/nux_engine/AudioEngine.cpp
     ../src/nux_engine/ChannelStrip.cpp
     ../src/nux_engine/PluginManager.cpp
