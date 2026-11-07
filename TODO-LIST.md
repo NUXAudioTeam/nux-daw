@@ -1,108 +1,133 @@
-# NUX DAW — මොකද ඉතුරු, මොකද කරන්න ඕන
+# NUX DAW — ඉතුරු වැඩ ලැයිස්තුව
 
-> අවසන් යාවත්කාලීනය: audio clips — [PR #2](https://github.com/hirushanethsara323-jpg/nux-daw/pull/2) (Windows MSVC CI green)
+> **යාවත්කාලීනය:** 2026-11-07 · branch `feature/audio-testing` · `99c12ed`
+> **තත්වය:** 104 test groups pass (Linux/Release). Windows CI segfault එකක් විමර්ශනය වෙමින්.
 
-මේක **ඇත්තටම කේතයේ තත්වය** අනුව හදපු ලැයිස්තුවක්. "implemented" කියලා ලියලා තියෙන දේවල් compile වෙලා test වෙලා තියෙනවා; "stub" කියලා තියෙන දේවල් UI එකේ තියෙනවා නමුත් ඇත්තටම වැඩ කරන්නේ නැහැ.
+මේක **කේතයේ ඇත්ත තත්වය** බලලා හදපු ලැයිස්තුවක්. මම හැම පේළියක්ම code එකේ බලලා තමයි ලියන්නේ.
+"✅" = compile වෙලා, test වෙලා, වැඩ කරනවා. "⬜" = නෑ. "🟡" = තියෙනවා නමුත් අසම්පූර්ණ.
 
 ---
 
-## 🔴 1. අනිවාර්යයෙන් මුලින්ම — Release blockers
+## 🔴 0. දැන් අතේ තියෙන වැඩ — feature/audio-testing
 
-| # | කාර්යය | ඇයි වැදගත් | තත්වය |
+| # | කාර්යය | සටහන | තත්ත්වය |
 |---|---|---|---|
-| 1.1 | **GitHub token එක revoke කරන්න** | Token එක chat එකේ public වුණා. Repo 30කටම access තියෙනවා | ⏳ ඔයාගේ පැත්තෙන් |
-| 1.2 | `.gitignore` + `build/` ඉවත් කරලා commit | `build/` ignore කරලා, history එක පිරිසිදු කරලා push කළා | ✅ |
-| 1.3 | `feature/v0.3-foundation` branch + **Pull Request** | [PR #1](https://github.com/hirushanethsara323-jpg/nux-daw/pull/1) open | ✅ |
-| 1.4 | **Windows/MSVC build එක verify කරන්න** | CI (MSVC 2022, Release) build + tests pass. `NUX DAW.exe` artifact upload වුණා | ✅ |
-| 1.5 | GitHub Actions CI (Windows + Linux) | දෙකම green. Linux ~13 min, Windows ~17 min | ✅ |
-| 1.6 | JUCE assertion 2ක් හදන්න | Xvfb එකේ clean start; `grabKeyboardFocus` + grid/track header overlap හදලා | ✅ |
-| 1.7 | `README.md`, `BUILDING.md`, `LICENSE`, `CHANGELOG.md` | හතරම ලියලා තියෙනවා | ✅ |
-| 1.8 | **Real Windows machine එකේ manual test** | CI එකට කරන්න බැරි දේ: WASAPI/ASIO device enumeration, latency, real VST3 folder එකකින් plugin load | ⬜ ඔයාගේ පැත්තෙන් |
+| 0.1 | **Windows CI segfault එක හොයාගන්න** | `NUXTests` Windows එකේ `Exception: SegFault 2.68s`. Linux එකේ groups 13ම pass. `ba4e237` (මගේ අලුත් code එකට කලින්) එකේත් crash වුණා → **කලින් සැඟවුණු Windows-only bug එකක්**. Unbuffered output + `--only` bisect දැම්මා | 🔴 විමර්ශනයේ |
+| 0.2 | **`feature/audio-testing` සඳහා PR එකක් අරින්න** | Branch එකේ commits 5ක්, PR එකක් තාම නෑ. PR #3 (`feature/vst3-hosting`) වෙනම | ⬜ |
+| 0.3 | Merge order එක විසඳන්න | #1 (`v0.3-foundation`) → #2 (`audio-clips`) → #3 (`vst3-hosting`) → audio-testing. Branches stack වෙලා තියෙනවා | ⬜ |
 
 ---
 
-## 🟠 2. අඩුපාඩු — UI තියෙනවා, logic එක නැහැ (stubs)
+## 🟠 1. Audio Engine — brief එකේ §1–§6 (මූලික වැඩ ඉවර, ඉතුරු ටික)
 
-**යාවත්කාලීනය: 2.1 (audio clip playback) අවසන් — PR #2.** ඉතුරු ඒවා පහත.
+| # | කාර්යය | දැන් තත්ත්වය |
+|---|---|---|
+| 1.1 | Offline DSP testing (440 Hz, levels, clipping, ramps, stereo, block sizes, sample rates) | ✅ 13 groups |
+| 1.2 | Device detection + VB-CABLE හඳුනාගැනීම + error messages | ✅ 6 groups |
+| 1.3 | **Virtual device එකක් UI එකෙන් තෝරන්න** | 🟡 **detection තියෙනවා, selection UI නෑ.** Engine එක default device එක auto-open කරනවා. VB-CABLE install කළත් user ට තෝරන්න විදියක් නෑ |
+| 1.4 | Recording — simulated input, WAV writing, integrity | ✅ (simulated) |
+| 1.5 | Recording — **real mic** එකෙන් | ❌ hardware නැහැ — unverified |
+| 1.6 | ASIO detect + compile | ✅ Windows CI එකේ compile වෙනවා (proven) |
+| 1.7 | **ASIO driver එකක් ඇත්තට open කරලා test** | ❌ කවදාවත් කරලා නෑ → "unverified" කියලා තමයි තියෙන්න ඕන |
+| 1.8 | WASAPI loopback capture | ❌ JUCE එකේ නෑ (`AUDCLNT_STREAMFLAGS_LOOPBACK` → 0 hits). Not supported |
 
-මේවා දැන් **ඇත්තටම වැඩ කරන්නේ නැහැ**. මම මේවා "implemented" කියලා report කළේ නැහැ:
+### Virtual Audio Lab (ඔයා එකඟ වුණ පිළිවෙල)
 
-| # | කාර්යය | දැන් තත්වය | කරන්න ඕන දේ |
+| # | පියවර | තත්ත්වය |
+|---|---|---|
+| 1.9 | **Step A — measurement maths + known-answer tests** | ✅ **අවසන්** (`99c12ed`) — 20 groups, bugs 5ක් හම්බුණා |
+| 1.10 | **Step B — virtual device round-trip**: generate → device → capture → measure → compare | ⬜ ඊළඟට. Step A එකේ measurements පාවිච්චි කරනවා |
+| 1.11 | Step C — real speaker/mic on Windows PC | ⬜ ඔයාගේ hardware එක ඕන |
+| 1.12 | Step D — ASIO (අන්තිමට) | ⬜ |
+
+---
+
+## 🟠 2. Stubs — UI එකේ තියෙනවා, logic එක නෑ
+
+මේවා මම "implemented" කියලා report කරලා නෑ:
+
+| # | කාර්යය | දැන් තත්ත්වය | කරන්න ඕන |
 |---|---|---|---|
-| 2.1 | **Audio clip playback** | ✅ **[PR #2](https://github.com/hirushanethsara323-jpg/nux-daw/pull/2)** — decode + cache, transport sync, loop retrigger, drag-and-drop import, waveform lane | ඉතුරු: real peak cache, trim/split/move |
-| 2.2 | **Audio recording** | `startRecordingToFile()` engine එකේ තියෙනවා, නමුත් UI එකේ button එකකට **wire කරලා නැහැ** | Record button එක + input channel + latency compensation |
-| 2.3 | **VST3 plugin එක signal path එකට** | ✅ **හදලා ඉවරයි** — `PluginSlot` එකක් insert slot එකක process කරනවා, state එක project එකේ save/load වෙනවා, editor window + plugin chooser තියෙනවා. Real VST3 දෙකක් එක්ක test කරලා ✅ | ඉතුරු: plugin කිහිපයක් එකම track එකේ chain කිරීමේ UI |
-| 2.4 | **VST3 instrument track** | ✅ **හදලා ඉවරයි** — hosted instrument එකකට sequencer MIDI යනවා, dry signal එක suppress වෙනවා. Test කරලා ✅ | ඉතුරු: track header එකෙන් instrument එක තෝරන UI menu එක (දැන් engine API එකෙන් විතරයි) |
-| 2.9 | **Undo / Redo** | ✅ **හදලා ඉවරයි** — `Ctrl+Z` / `Ctrl+Y`, හැම edit එකක්ම (steps, notes, clips, faders, inserts, plugins, tempo, tracks, renames). Same edit එකක් drag කරද්දී එක step එකක් විතරයි (coalescing) | ඉතුරු: mixer value එකක් drag කරලා *පස්සේ* තව edit එකක් කළොත් step දෙකක් වෙන්න පුළුවන් (450 ms window) |
-| 2.5 | **Piano roll velocity knob** | UI එකේ තියෙනවා, `ignoreUnused` කරලා තියෙන්නේ | Note එකක් draw කරද්දී ඒ value එක use කරන්න + note එකේ velocity edit කරන්න |
-| 2.6 | **Octave +/- buttons** | `octaveOffset` විතරයි වෙනස් වෙන්නේ, canvas එකේ view එක scroll වෙන්නේ නැහැ | `setLowestNote()` එකට hook කරන්න |
-| 2.7 | **Pattern clips (multi-clip)** | Model එකේ `Clip` array එකක් තියෙනවා, නමුත් UI එකේ **එකම clip එක** විතරයි edit වෙන්නේ | Timeline එකේ clip blocks, add/delete/move |
-| 2.8 | **Insert parameter editing** | ✅ **හදලා ඉවරයි** — insert එක double-click කළාම knobs වලින් parameters edit කරන්න පුළුවන් (units, ranges, log frequency, reset). Descriptors `nux_core/InsertParameters` එකේ | ඉතුරු: plugin parameters සඳහා generic knobs |
-| 2.9 | **Track reorder / delete UI** | Right-click menu එකේ තියෙනවා, නමුත් drag-to-reorder නැහැ | Drag & drop track ordering |
-| 2.10 | **Loop length vs pattern length** | `patternLengthSteps` විතරයි; song mode එකක් නැහැ | Arrangement/song mode (9 වෙනි කොටස බලන්න) |
+| 2.1 | **Record button එක UI එකට wire කිරීම** | `startRecordingToFile()` engine එකේ තියෙනවා, UI button එකකට සම්බන්ධ නෑ | transport record button + input channel + latency compensation |
+| 2.2 | **Piano roll velocity knob** | `ignoreUnused` කරලා | note draw වෙද්දී value එක use කරන්න |
+| 2.3 | **Octave +/- buttons** | `octaveOffset` විතරයි වෙනස් වෙන්නේ, canvas scroll වෙන්නේ නෑ | `setLowestNote()` hook |
+| 2.4 | **Pattern clips (multi-clip)** | Model එකේ `Clip` array, UI එකේ එකම clip එකයි edit වෙන්නේ | timeline blocks, add/delete/move |
+| 2.5 | **Track drag-to-reorder** | Right-click menu එකේ delete තියෙනවා, drag නෑ | drag & drop ordering |
+| 2.6 | **Metronome** | icon එක තියෙනවා, click track නෑ | audio click generator |
+| 2.7 | **MIDI recording → timeline** | Notes capture වෙනවා (arm කරලා), timeline එකට ලියන්නේ නෑ | quantize + write to clip |
+| 2.8 | **Multi-plugin chain UI** | `PluginSlot` එකක් process කරනවා, chain UI නෑ | slot එකට plugin කිහිපයක් |
+| 2.9 | **Instrument එක track header එකෙන් තෝරන menu** | Engine API එකෙන් විතරයි | menu එකක් |
 
 ---
 
-## 🟡 3. v0.4 සඳහා — MIDI & editing (roadmap එකේ ඊළඟ පියවර)
+## 🟡 3. MIDI & editing — v0.4
 
 | # | කාර්යය | සටහන |
 |---|---|---|
-| 3.1 | **Undo / Redo** | දැන් නැහැ. `UndoManager` + `ValueTree` එකට migrate කරන්න ඕන (මේක ලොකු refactor එකක්) |
-| 3.2 | **Note length / resize** | Notes හැම වෙලාවෙම 1 step. Drag-to-resize + length field |
-| 3.3 | **Multi-select notes** | Marquee selection, copy/paste/duplicate |
-| 3.4 | **Velocity lane** | Piano roll එකේ පහළින් velocity bars |
-| 3.5 | **Quantize / swing** | Groove controls |
-| 3.6 | **MIDI recording** | External keyboard එකෙන් notes capture වෙනවා ✅ (arm කරලා), නමුත් **timeline එකට ලියන්නේ නැහැ** |
-| 3.7 | **MIDI learn / CC mapping** | Knobs → hardware controllers |
-| 3.8 | **Metronome** | Icon එක තියෙනවා, click track එක නැහැ |
-| 3.9 | **Time signature / multiple bars** | දැන් 4/4 fix වෙලා |
+| 3.1 | Note length / resize | දැන් හැම note එකම 1 step |
+| 3.2 | Multi-select notes | marquee, copy/paste/duplicate |
+| 3.3 | Velocity lane | piano roll එකේ පහළින් bars |
+| 3.4 | Quantize / swing | groove controls |
+| 3.5 | MIDI learn / CC mapping | knobs → hardware controllers |
+| 3.6 | Time signature / multiple bars | දැන් 4/4 fix |
+| 3.7 | Arrangement / song mode | `patternLengthSteps` විතරයි |
+| 3.8 | Clip trim / split / move | audio clip එකේ ඉතුරු |
+| 3.9 | Real peak cache (waveform) | දැන් simplified |
 
 ---
 
-## 🟢 4. v1.0 සඳහා — Pro features
+## 🟢 4. Pro features — v1.0
 
 | # | කාර්යය |
 |---|---|
-| 4.1 | **Automation lanes** (volume, pan, plugin parameters) |
-| 4.2 | **Waveform display** for audio clips (`AudioThumbnail`) |
-| 4.3 | **Bus routing matrix** (bus → bus, sidechain) |
-| 4.4 | **ASIO support verify** — JUCE එකේ තියෙනවා, නමුත් SDK path + license check ඕන |
-| 4.5 | **Freeze / bounce track** to save CPU |
-| 4.6 | **Stem export** (per-track WAV) |
-| 4.7 | **MP3 / FLAC export** (JUCE එකේ license issue — check කරන්න) |
-| 4.8 | **Project templates + autosave / crash recovery** |
-| 4.9 | **Drag & drop** (files into timeline, clips between tracks) |
-| 4.10 | **HiDPI / scaling** + accessibility |
-| 4.11 | **Installer** (Inno Setup / WiX) + code signing |
-| 4.12 | **Crash reporting / logging** |
+| 4.1 | Automation lanes (volume, pan, plugin params) |
+| 4.2 | Bus routing matrix (bus → bus, sidechain) |
+| 4.3 | Freeze / bounce track |
+| 4.4 | Stem export (per-track WAV) |
+| 4.5 | MP3 / FLAC export (JUCE license check ඕන) |
+| 4.6 | Project templates + autosave / crash recovery |
+| 4.7 | Drag & drop (files → timeline, clips between tracks) |
+| 4.8 | HiDPI / scaling + accessibility |
+| 4.9 | Installer (Inno Setup / WiX) + code signing |
+| 4.10 | Crash reporting / logging |
+| 4.11 | CPU metering, latency compensation |
 
 ---
 
-## ⚙️ 5. තාක්ෂණික ණය (technical debt) — මම දැනුවත්ව තියලා ගිය දේවල්
+## ⚙️ 5. තාක්ෂණික ණය — දැනුවත්ව තියලා ගිය දේවල්
 
-| # | ප්‍රශ්නය | ඇයි දැන් එහෙම කළේ | විසඳුම |
+| # | ප්‍රශ්නය | ඇයි අවුල් | විසඳුම |
 |---|---|---|---|
-| 5.1 | **Solo logic double-mute** | Solo එක `tracksSoloed` atomic එකෙන් **සහ** `strip.muted` එකෙන් handle වෙනවා. දැන් වැඩ කරනවා, නමුත් අතිරික්තයි | Solo/mute එකම තැනකට ගේන්න |
-| 5.2 | **Insert params thread safety** | Audio thread එක `inserts[]` struct එක read කරනවා, UI එක ලියනවා (audio callback එක නවත්තලා නැති වෙලාවෙ) | `std::atomic<float>` array එකකට හෝ lock-free command queue එකකට |
-| 5.3 | **`TrackState` එකේ GUI dependency** | `Colour` සඳහා `juce_graphics` include කරලා (headless tests සඳහා අවශ්‍ය වුණා) | ARGB `uint32` එකක් රඳවලා, conversion එක UI layer එකට |
-| 5.4 | **ValueTree එකක් නැහැ** | Plain structs + manual `markDirty()`. Undo/redo එකට මේක අවහිරයි | JUCE `ValueTree` + `UndoManager` එකට migrate |
-| 5.5 | **`-Wfloat-equal` warnings** | `InsertSlot::operator==` එකේ `p1 == o.p1` | `juce::exactlyEqual` use කරන්න |
-| 5.6 | **Deprecated `AlertWindow` API** | `showYesNoCancelBox` (JUCE 9 deprecated) | `AlertWindow::showScopedAsync()` එකට මාරු කරන්න |
-| 5.7 | **`JUCE_MODAL_LOOPS_PERMITTED=1`** | `AlertWindow` modal loops සඳහා | Async API එකට ගිහින් මේක අයින් කරන්න |
-| 5.8 | **Tests: Linux විතරයි** | Windows CI එකක් තාම නැහැ | 1.5 CI workflow එකෙන් විසඳෙනවා |
-| 5.9 | **Engine test එකේ ALSA warning** | Headless environment එකේ MIDI device නැති නිසා | Test එකේ MIDI input disable කරන්න |
+| 5.1 | **Insert params thread safety** | Audio thread එක `inserts[]` read කරනවා, UI එක ලියනවා lock-free නෙවෙයි | `std::atomic<float>` හෝ lock-free queue |
+| 5.2 | **`TrackState` එකේ GUI dependency** | `Colour` සඳහා `juce_graphics` include | ARGB `uint32`, conversion UI layer එකේ |
+| 5.3 | **ValueTree එකක් නෑ** | Plain structs + manual `markDirty()`. Undo වැඩ කරනවා නමුත් automation එකට අවහිරයි | `ValueTree` + `UndoManager` migrate |
+| 5.4 | **`-Wfloat-equal` warnings** | `InsertSlot::operator==` | `juce::exactlyEqual` |
+| 5.5 | **Deprecated `AlertWindow`** | `showYesNoCancelBox` (JUCE 9) | `showScopedAsync()` |
+| 5.6 | **`JUCE_MODAL_LOOPS_PERMITTED=1`** | Modal loops සඳහා | Async API එකට ගිහින් අයින් කරන්න |
+| 5.7 | **Solo double-mute** | `tracksSoloed` + `strip.muted` දෙකෙන්ම | එකම තැනකට |
+| 5.8 | **Engine test ALSA warning** | Headless MIDI device නැති නිසා | test එකේ MIDI input disable |
+
+---
+
+## ⚠️ 6. Release blockers — මගේ පැත්තෙන් කරන්න බැරි
+
+| # | කාර්යය | තත්ත්වය |
+|---|---|---|
+| 6.1 | **GitHub PAT එක revoke කරන්න** | ⏳ ඔයාගේ පැත්තෙන් — token එක chat එකේ public වුණා |
+| 6.2 | **Real Windows PC එකේ manual test** | ⬜ device enumeration, latency, real VST3, real mic |
+| 6.3 | **"NUX" trademark clearance** | ⬜ |
+| 6.4 | **JUCE license** | ⬜ AGPLv3 හෝ commercial — තීරණයක් ඕන |
 
 ---
 
 ## 📋 මගේ නිර්දේශිත අනුපිළිවෙල
 
-**පියවර 1 (අද):** 1.1 – 1.7 → clean repo, PR, CI, Windows verify, docs
-**පියවර 2:** 2.1 ✅ audio clips, 2.3 ✅ VST3 in signal path, 2.4 ✅ VST3 instruments — **ඉවරයි**. ඊළඟට 2.8 (insert params UI) සහ 2.5 (undo/redo)
-**පියවර 3:** 5.4, 3.1 → ValueTree + Undo (මේක පස්සේ කරන්න බැහැ, එහෙම නොකළොත් හැම feature එකක්ම දෙපාරක් ලියන්න වෙනවා)
-**පියවර 4:** 2.2, 3.2–3.8 → recording + MIDI editing
-**පියවර 5:** 4.x → pro features
+1. **0.1** Windows segfault — CI run එකේ result එක බලලා. මේක නැතුව "green" කියන්න බෑ.
+2. **0.2 + 0.3** PR එක අරින්න, merge order එක විසඳන්න.
+3. **1.10** Virtual Audio Lab Step B — virtual device round-trip. Step A එකේ measurements දැන් ready, මේක තමයි ඊළඟ අර්ථවත් පියවර.
+4. **1.3** Virtual device selection UI — brief එකේ ඉල්ලලා තියෙන දේ, detect කරලා තියෙනවා නමුත් තෝරන්න බෑ.
+5. **2.1** Record button wire කිරීම — recording engine එක තියෙනවා, UI එකෙන් ළඟා කරන්න බෑ.
+6. **5.1, 5.3** technical debt — මේක පස්සේ කරන්න බැහැ, එහෙම නොකළොත් automation එක double ලියන්න වෙනවා.
+7. **3.x** MIDI editing → **4.x** pro features.
 
----
-
-### මොකද මම ඊළඟට කරන්න ඕන?
-ඔයා කැමති නම් මම **පියවර 1** (repo + PR + CI + docs + assertion fixes) දැන්ම කරන්නම් — ඒකෙන් පස්සේ ඔයාට Windows එකේ clone කරලා build කරලා බලන්න පුළුවන්. නැත්නම් **පියවර 2** (audio clips / VST3 processing) එකෙන් පටන් ගන්නද?
+**Hardware සහ software වෙන් කරලා තමයි මම report කරන්නේ.** 1.5, 1.7, 1.11, 6.2 — මේවා හැම එකක්ම hardware එකක් ඕන, ඒ නිසා "not performed" විදියටම තියෙනවා.
