@@ -65,6 +65,13 @@ public:
     juce::String applyDeviceChoice (const juce::String& typeName,
                                     const juce::String& outputName,
                                     const juce::String& inputName);
+
+    /** True when the track is armed *as published for the non-message threads*.
+
+        The MIDI input callback runs on its own thread and must not read the project model.
+        This exposes what it actually reads, so a test can prove the arming state really is
+        published rather than only living in the model. */
+    bool isTrackRecordArmedPublished (int trackIndex) const;
     void shutdownAudio();
     bool isAudioAvailable() const noexcept { return audioReady; }
     juce::String getAudioStatusMessage() const;
@@ -311,6 +318,13 @@ private:
     MasterBus masterBus;
     std::array<int, constants::maxTracks> trackBusIndex {};
     std::array<std::atomic<bool>, constants::maxTracks> tracksSoloed {};
+
+    /** Which tracks are armed, published for the threads that are not the message thread.
+
+        The MIDI input callback runs on its own thread and used to read
+        `projectState->tracks[i].recordArmed` straight from the model, which is a data race
+        against the UI arming and disarming a track. It reads this instead. */
+    std::array<std::atomic<bool>, constants::maxTracks> tracksRecordArmed {};
     std::array<std::atomic<float>, constants::numMixerBuses> busDelaySends {};
     std::array<std::atomic<float>, constants::numMixerBuses> busReverbSends {};
 

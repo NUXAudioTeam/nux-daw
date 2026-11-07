@@ -1,3 +1,23 @@
+## [Unreleased] - ThreadSanitizer in CI, and the race it found
+
+### Added
+
+- **`Linux (GCC, ThreadSanitizer)` CI job.** Builds the test runner and the VST3 test
+  plugins with `-fsanitize=thread` and fails the build on any report (`halt_on_error=1`,
+  explicit `All NUX tests passed` check, and a grep for TSan warnings). The Windows and
+  Linux Release jobs are untouched: MSVC has no usable TSan and the races here are portable.
+
+### Fixed
+
+- **The MIDI input callback read the project model.** `handleIncomingMidiMessage` decided
+  whether to preview a note by reading `projectState->tracks[i].recordArmed` directly, on
+  the MIDI thread, racing every arm and disarm in the UI. It reads a published atomic now,
+  and a test proves the arming state is really published.
+
+### Verified
+
+- Full suite under TSan locally: 131 groups, 15 suites, all passed, **0 races**.
+
 ## [Unreleased] - insert parameters are now published, not shared
 
 ### Fixed

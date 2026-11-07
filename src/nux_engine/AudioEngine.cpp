@@ -57,6 +57,14 @@ juce::String AudioEngine::initialiseAudio()
     return lastDeviceError;
 }
 
+bool AudioEngine::isTrackRecordArmedPublished (int trackIndex) const
+{
+    if (! juce::isPositiveAndBelow (trackIndex, constants::maxTracks))
+        return false;
+
+    return tracksRecordArmed[(size_t) trackIndex].load (std::memory_order_relaxed);
+}
+
 juce::String AudioEngine::applyDeviceChoice (const juce::String& typeName,
                                              const juce::String& outputName,
                                              const juce::String& inputName)
@@ -209,6 +217,7 @@ void AudioEngine::rebuildGraph()
         const auto& source = projectState->tracks[(size_t) i];
         trackBusIndex[(size_t) i] = juce::jlimit (0, constants::numMixerBuses - 1, source.busIndex);
         tracksSoloed[(size_t) i].store (source.soloed);
+        tracksRecordArmed[(size_t) i].store (source.recordArmed);
         track.strip.getParameters().loadFrom (source);
 
         if (graphPrepared)
@@ -285,6 +294,7 @@ void AudioEngine::syncMixerFromState()
 
         trackBusIndex[(size_t) i] = juce::jlimit (0, constants::numMixerBuses - 1, source.busIndex);
         tracksSoloed[(size_t) i].store (source.soloed);
+        tracksRecordArmed[(size_t) i].store (source.recordArmed);
     }
 
     for (int i = 0; i < constants::numMixerBuses; ++i)
@@ -646,12 +656,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
 void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
-    if (projectState == nullptr || ! message.isNoteOn())
+    if (! message.isNoteOn())
         return;
 
     for (int i = 0; i < trackCount; ++i)
     {
-        if (projectState->tracks[(size_t) i].recordArmed)
+        // Published state, not the model: this runs on the MIDI thread while the UI is
+        // free to arm and disarm tracks.
+        if (tracksRecordArmed[(size_t) i].load (std::memory_order_relaxed))
         {
             triggerPreviewNote (i, message.getNoteNumber(), message.getFloatVelocity());
             return;

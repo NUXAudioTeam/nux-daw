@@ -225,3 +225,94 @@ jobs:
           # The host tests are only meaningful when the VST3 test plugins exist.
           find build -name "NUX Test Gain.vst3" -print -quit | grep .             || (echo "The VST3 test plugins were not built, so plugin hosting was not verified." && exit 1)
           find build -name "NUX Test Tone.vst3" -print -quit | grep .             || (echo "The VST3 instrument test plugin was not built." && exit 1)
+
+  # ThreadSanitizer, on Linux only.
+  #
+  # Windows has no usable TSan, and the races that matter in this project are in portable
+  # code: the audio thread against the UI thread, and the MIDI thread against both. This
+  # job exists to keep the "publish, don't share" rule honest - a comment claiming a
+  # lock-free handoff is worth nothing if nothing ever checks it.
+  #
+  # It is deliberately a separate job with the NUXTests target only. A TSan build is slow,
+  # and it should never slow down the three jobs that gate the release.
+  #
+  # What this does NOT prove: TSan reports races it observes. A clean run means none were
+  # observed on the paths this suite exercises, not that the program is race free.
+  linux-tsan:
+    name: Linux (GCC, ThreadSanitizer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      # halt_on_error makes the process die on the first race rather than print and
+      # carry on, and exitcode makes it a non-zero exit that fails the step.
+      TSAN_OPTIONS: halt_on_error=1 exitcode=66 second_deadlock_stack=1
+
+    steps:
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libasound2-dev libx11-dev libxext-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libfreetype6-dev \
+            libfontconfig1-dev libcurl4-openssl-dev libgtk-3-dev
+
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Check that ThreadSanitizer is usable on this kernel
+        run: |
+          # Newer kernels use a wider mmap randomisation than TSan supports and it
+          # aborts with "unexpected memory mapping". Narrowing it is the documented
+          # workaround; if it is not permitted, say so instead of failing silently.
+          sudo sysctl vm.mmap_rnd_bits=28 || echo "::warning::could not narrow vm.mmap_rnd_bits"
+          cat << 'EOF' > /tmp/tsan-probe.cpp
+          int main() { return 0; }
+          EOF
+          g++ -fsanitize=thread -g /tmp/tsan-probe.cpp -o /tmp/tsan-probe
+          /tmp/tsan-probe && echo "TSan is usable"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread -g -O1 -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread"
+
+      - name: Build the test runner
+        run: cmake --build build-tsan --target NUXTests --parallel
+
+      # The VST3 test plugins must exist, or PluginHostTests reports its "not built"
+      # group and the hosting path is not exercised under TSan at all.
+      - name: Build the VST3 test plugins
+        run: cmake --build build-tsan --target NUXTestGain_VST3 NUXTestTone_VST3 --parallel
+
+      - name: Run the suite under ThreadSanitizer
+        run: |
+          set -o pipefail
+          # A race kills the process with exit code 66; a failed assertion fails the suite.
+          # Either way this step fails, and it fails on purpose.
+          ./build-tsan/tests/NUXTests_artefacts/Debug/NUXTests 2>&1 | tee /tmp/tsan-output.txt
+          if ! grep -q "All NUX tests passed" /tmp/tsan-output.txt; then
+            echo "::error::The suite did not report success under ThreadSanitizer."
+            exit 1
+          fi
+          if grep -q "WARNING: ThreadSanitizer" /tmp/tsan-output.txt; then
+            echo "::error::ThreadSanitizer reported a race."
+            exit 1
+          fi
+
+      - name: Publish the ThreadSanitizer output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsan-output
+          path: /tmp/tsan-output.txt
+          if-no-files-found: warn
+          retention-days: 14
+

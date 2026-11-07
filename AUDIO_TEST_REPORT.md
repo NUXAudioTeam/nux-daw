@@ -311,6 +311,51 @@ until a real run replaces it.
 
 ---
 
+## 6e. ThreadSanitizer — the races a passing test suite cannot see
+
+A comment claiming a lock-free handoff is worth nothing unless something checks it. Step
+5.1 replaced a data race on insert parameters with a publish/acquire arrangement, and this
+job is what keeps that honest.
+
+**What was run (locally, GCC 14, `-fsanitize=thread -g -O1`, Debug):**
+
+```
+131 groups, 15 suites
+All NUX tests passed.
+WARNING: ThreadSanitizer ... occurrences: 0
+exit code 0
+```
+
+**What TSan found in the surrounding code, from the audit that went with it:**
+
+| Area | Result |
+|---|---|
+| `AudioEngine::renderBlock` (the audio thread proper) | clean — no allocation, no model access |
+| `audioDeviceIOCallbackWithContext` | clean |
+| Insert parameters | clean — the atomic publish/acquire handoff races nowhere |
+| `handleIncomingMidiMessage` | **read the project model directly** — fixed, see below |
+| Plugin hosting under TSan | clean (with the VST3 test plugins built) |
+
+The MIDI input callback runs on its own thread and read
+`projectState->tracks[i].recordArmed` straight from the model, which is a race against the
+UI arming or disarming a track. It now reads a published atomic, and a test pins that
+arming a track actually reaches that published state:
+
+```
+Arming a track is published to the MIDI thread, not just stored
+```
+
+**What this does not prove.** TSan reports the races it observes while the suite runs. A
+clean run means no race was observed on these paths, not that the program is race free:
+unexercised code, unsynchronised globals touched once at startup, and anything the tests do
+not drive stay unobserved. It is a very good detector, not a proof.
+
+The CI job `Linux (GCC, ThreadSanitizer)` runs the same suite with `halt_on_error=1` and
+fails the build on any report. Windows keeps its Debug/Release jobs unchanged: MSVC has no
+usable TSan, and the races that matter here are in portable code.
+
+---
+
 ## 7. WASAPI loopback capture — investigated, not supported
 
 The prompt asked to investigate Windows WASAPI loopback capture and implement it if
