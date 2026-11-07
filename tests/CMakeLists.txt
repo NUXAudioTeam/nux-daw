@@ -12,6 +12,8 @@ target_sources(NUXTests PRIVATE
     UndoTests.cpp
     RecordingTests.cpp
     AudioDeviceTests.cpp
+    OfflineAudioTests.cpp
+    DeviceProbeTests.cpp
     ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/InsertParameters.cpp
@@ -20,6 +22,7 @@ target_sources(NUXTests PRIVATE
     ../src/nux_engine/AudioClipPlayer.cpp
     ../src/nux_engine/AudioClipStore.cpp
     ../src/nux_engine/InputRecorder.cpp
+    ../src/nux_engine/AudioDeviceProbe.cpp
     ../src/nux_engine/AudioEngine.cpp
     ../src/nux_engine/ChannelStrip.cpp
     ../src/nux_engine/PluginManager.cpp
@@ -35,7 +38,12 @@ target_compile_definitions(NUXTests PRIVATE
     JUCE_STANDALONE_APPLICATION=1
     JUCE_UNIT_TESTS=1
     JUCE_MODAL_LOOPS_PERMITTED=1
-    JUCE_PLUGINHOST_VST3=1)
+    JUCE_PLUGINHOST_VST3=1
+    # Must match the application, or the device probe would test a different build.
+    JUCE_WASAPI=1
+    $<$<PLATFORM_ID:Windows>:JUCE_ASIO=1>
+    $<$<PLATFORM_ID:Windows>:JUCE_WASAPI_EXCLUSIVE=1>
+    $<$<PLATFORM_ID:Windows>:JUCE_DIRECTSOUND=1>)
 
 target_link_libraries(NUXTests PRIVATE
     juce::juce_audio_basics

@@ -21,9 +21,17 @@ namespace nux
 {
 class PluginSlot;
 
-class PluginRetirementQueue final : private juce::Timer
+class PluginRetirementQueue final : private juce::Timer,
+                                   public juce::DeletedAtShutdown
 {
+    // DeletedAtShutdown (not a deliberately leaked static): JUCE deletes it after the
+    // message loop has stopped, which is late enough for window teardown but early
+    // enough that the Debug leak detector stays quiet. A leaked singleton tripped the
+    // leak detector on every Debug run of the test suite.
+
 public:
+    /** Creates the shared queue on first use. Ownership is handled by
+        DeletedAtShutdown, so the Debug leak detector stays quiet. */
     static PluginRetirementQueue& getInstance();
 
     /** Takes ownership of a plugin slot and destroys it later. Message thread only. */

@@ -1,3 +1,35 @@
+## [Unreleased] - audio testing
+
+### Added
+- **Offline audio test suite** (`tests/OfflineAudioTests.cpp`, 13 groups) that needs no
+  sound card: 440 Hz accuracy at 44.1/48/88.2/96 kHz, level in dBFS, clipping at every
+  level, click-free ramps, identical stereo channels, every block size from 32 to 2048,
+  sample rates up to 192 kHz, bit-identical determinism, mute/solo/master fader
+  behaviour, and a full WAV write/read round trip.
+- `tests/SignalAnalysis.h` - frequency, peak, RMS, clipping, step-discontinuity and
+  channel-difference measurement used by the tests.
+- **Device inventory** (`src/nux_engine/AudioDeviceProbe.{h,cpp}`): lists driver types and
+  devices, recognises virtual cables (VB-CABLE, Voicemeeter, loopback adapters) by name,
+  reports ASIO only when a driver is really installed, and always produces a message
+  explaining what was checked.
+- `tests/DeviceProbeTests.cpp` (6 groups) covering the detection logic and the real
+  machine's inventory.
+- **`AUDIO_TEST_REPORT.md`** separating passed, simulated, virtual-device, physical and
+  ASIO tests, with the limitations spelled out.
+- `docs/hardware-checklist.md` - the manual checks that still need real hardware.
+
+### Fixed
+- **ASIO was never actually compiled in.** `JUCE_ASIO` defaults to `0` and was absent from
+  `CMakeLists.txt`, so the README's "ASIO where installed" was wrong. WASAPI, WASAPI
+  exclusive, DirectSound and (on Windows) ASIO are now set explicitly.
+- `probeAudioDevices()` reported 2 output channels for a driver type with **zero** devices,
+  because `getDefaultDeviceIndex()` returns an index even for an empty list. Channel
+  counts now come from the device list.
+- A device manager that had never been initialised reported no driver types at all,
+  which read as "no drivers exist". The probe now registers the platform types first.
+- The test tone's independence from mutes and the master fader is now deliberate and
+  pinned by a test, instead of being an accident of where it is summed in.
+
 ## [Unreleased]
 
 ### Added

@@ -833,8 +833,9 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
 
     masterBus.renderMaster (output, nullptr);
 
-    // The test tone is added *after* the master chain so it is audible even when every
-    // track is muted, which is the whole point of a device test.
+    // The test tone is a *device* test, so it is deliberately added after the master
+    // chain: a fader pulled to -inf or a muted project must not be able to make the
+    // sound card look broken. It reflects nothing but "can this device make a noise".
     testTone.render (output, numSamples);
 
     // Publish the peak of what actually went to the device, for the output meters.
