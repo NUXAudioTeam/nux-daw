@@ -21,6 +21,18 @@ struct Options
     bool list = false;
 };
 
+/** JUCE's default logger writes to OutputDebugString on Windows, so a CI log from a
+    Windows runner contains none of the "Starting tests in: ..." lines that make a crash
+    locatable. This routes everything to stdout, flushed per line. */
+class ConsoleLogger final : public juce::Logger
+{
+public:
+    void logMessage (const juce::String& message) override
+    {
+        std::cout << message << std::endl;   // endl flushes
+    }
+};
+
 Options parseOptions (int argc, char** argv)
 {
     Options options;
@@ -51,6 +63,9 @@ int main (int argc, char** argv)
     std::cerr << std::unitbuf;
 
     const auto options = parseOptions (argc, argv);
+
+    ConsoleLogger logger;
+    juce::Logger::setCurrentLogger (&logger);
 
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
 
@@ -103,6 +118,7 @@ int main (int argc, char** argv)
         std::cout << numFailures << " NUX test assertion(s) failed.\n";
 
     std::cout.flush();
+    juce::Logger::setCurrentLogger (nullptr);
 
     return numFailures == 0 ? 0 : 1;
 }

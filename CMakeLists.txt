@@ -65,6 +65,7 @@ target_sources(NUX PRIVATE
     src/nux_engine/AudioDeviceProbe.cpp
     src/nux_engine/Measurements.cpp
     src/nux_engine/TestSignals.cpp
+    src/nux_engine/RoundTrip.cpp
     src/nux_engine/AudioEngine.cpp
     src/nux_engine/ChannelStrip.cpp
     src/nux_engine/Synth.cpp

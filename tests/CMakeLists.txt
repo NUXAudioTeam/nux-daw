@@ -15,6 +15,7 @@ target_sources(NUXTests PRIVATE
     OfflineAudioTests.cpp
     DeviceProbeTests.cpp
     MeasurementTests.cpp
+    RoundTripTests.cpp
     ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/InsertParameters.cpp
@@ -26,6 +27,7 @@ target_sources(NUXTests PRIVATE
     ../src/nux_engine/AudioDeviceProbe.cpp
     ../src/nux_engine/Measurements.cpp
     ../src/nux_engine/TestSignals.cpp
+    ../src/nux_engine/RoundTrip.cpp
     ../src/nux_engine/AudioEngine.cpp
     ../src/nux_engine/ChannelStrip.cpp
     ../src/nux_engine/PluginManager.cpp
@@ -60,9 +62,43 @@ target_link_libraries(NUXTests PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)
 
+# One ctest entry per group, not one for the whole binary.
+#
+# A single monolithic test is undiagnosable: when the process segfaults, ctest reports
+# "NUXTests (SEGFAULT)" and nothing else, which is exactly what happened on Windows CI
+# and could not be narrowed down from the log. Registering each group separately makes
+# ctest name the group that crashed, on any platform.
+set(NUX_TEST_GROUPS
+    "project model"
+    "project serialization"
+    "DSP building blocks"
+    "audio clips"
+    "engine rendering"
+    "plugin hosting"
+    "insert parameters"
+    "undo history"
+    "input recording"
+    "audio device"
+    "offline audio"
+    "device inventory"
+    "measurements"
+    "audio round trip")
+
+foreach (group IN LISTS NUX_TEST_GROUPS)
+    string(REPLACE " " "_" slug "${group}")
+    add_test(NAME "NUX_${slug}" COMMAND NUXTests "--only=${group}")
+
+    set_tests_properties("NUX_${slug}" PROPERTIES
+        # A group takes a second or two; this stops a hang blocking CI forever.
+        TIMEOUT 300
+        FAIL_REGULAR_EXPRESSION "FAILED!!")
+endforeach()
+
+# The whole suite in one process as well. Two groups can each pass alone and still
+# interact (shared global state, a leaked object, a stale device handle), and only a
+# single-process run catches that.
 add_test(NAME NUXTests COMMAND NUXTests)
 set_tests_properties(NUXTests PROPERTIES
-    # A full run takes a few seconds; this stops a hung test blocking CI forever.
     TIMEOUT 900
     FAIL_REGULAR_EXPRESSION "FAILED!!")
 
