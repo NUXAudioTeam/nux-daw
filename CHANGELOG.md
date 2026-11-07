@@ -1,3 +1,20 @@
+## [Unreleased] - take placement extracted and tested, and two undo steps that were one
+
+### Added
+
+- **`nux_core/TakePlacement.{h,cpp}`**: the arithmetic that turns a finished recording into a
+  clip now lives outside the UI - tempo to steps, rounding of the start position, pattern
+  growth, the audio-track conversion, and the fallback for a stale track index.
+- 17 test groups (`NUX_take_placement`), registered with ctest and covered by the
+  ThreadSanitizer job. `TAKE_PLACEMENT_TEST_REPORT.md` records the exact results.
+
+### Fixed
+
+- **Two recordings were one undo step.** `placeRecordedTake` passed a shared edit key, and a
+  shared key means "continuation of the same edit", so a single undo removed every take
+  recorded in the session. An empty key makes each recording discrete. Found by the new
+  tests on their first run.
+
 ## [Unreleased] - ThreadSanitizer in CI, and the race it found
 
 ### Added

@@ -49,6 +49,7 @@
 
 | # | කාර්යය | දැන් තත්ත්වය | කරන්න ඕන |
 |---|---|---|---|
+| 2.1a | **Take placement logic `nux_core` එකට ගෙනත් unit tests** | ✅ **අවසන්** — 17 groups, `TAKE_PLACEMENT_TEST_REPORT.md`. ඒ ගමන් **undo bug එකක්** හම්බුණා: takes දෙකක් undo step එකක් වුණා | ✅ |
 | 2.1 | ~~Record button UI එකට wire කිරීම~~ | ✅ **දැනටමත් තියෙනවා — මගේ කලින් සටහන වැරදියි.** `TransportBar::recordButton` → `onRecordToggled` → `MainComponent::toggleRecording()` → `engine.startInputRecording()` → `stopInputRecording()` → `placeRecordedTake()`. `--record-self-test` එකෙන් ඔප්පු කළා (take → clip, track → audio, clip load වුණා). **ඉතුරු:** latency compensation + monitoring | ✅ (latency ❌) |
 | 2.2 | **Piano roll velocity knob** | `ignoreUnused` කරලා | note draw වෙද්දී value එක use කරන්න |
 | 2.3 | **Octave +/- buttons** | `octaveOffset` විතරයි වෙනස් වෙන්නේ, canvas scroll වෙන්නේ නෑ | `setLowestNote()` hook |
