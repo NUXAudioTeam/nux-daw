@@ -32,7 +32,15 @@ A digital audio workstation for Windows, written in C++20 with
 | **Audio clip playback, import and drag-and-drop** | ✅ |
 | Undo / redo (`Ctrl+Z` / `Ctrl+Y`) | ✅ |
 | Editable effect parameters (EQ, compressor, delay, reverb) | ✅ |
+| **Recording the audio input onto an armed track** | ✅ (verified with simulated input; see caveat below) |
+| **Choosing a hosted VST3 instrument from the track menu** | ✅ |
 | Automation, MIDI learn | ❌ not yet |
+| ASIO, CPU metering, latency compensation, sidechain | ❌ not yet |
+
+> **Recording caveat.** The recorder is verified with simulated input through the same
+> ring buffer the audio thread uses, and the device is opened with 2 input channels.
+> Capturing from a real microphone or interface still has to be confirmed on Windows
+> hardware — please record a take and check it before relying on it.
 
 Screenshots of every workspace live in [`docs/screenshots/`](docs/screenshots).
 
