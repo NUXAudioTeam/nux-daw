@@ -18,6 +18,9 @@ was ever produced or captured by a real device during this run.
 | Category | Status |
 |---|---|
 | Offline (device independent) audio tests | ✅ **13 groups, all passed** |
+| Measurement / instrumentation maths (step A) | ✅ **20 groups, all passed** |
+| Software round trip + verification levels (step B) | ✅ **10 groups, all passed** |
+| Windows CI: build Debug + Release | ✅ **builds, 15/15 ctest** (Debug leak check clean) |
 | Simulated input recording | ✅ **7 groups, all passed** |
 | Test tone / metering / device recovery | ✅ **6 groups, all passed** |
 | Device inventory + virtual device detection | ✅ **6 groups, all passed** (logic only) |
@@ -147,6 +150,73 @@ Two behaviours are deliberate, and are covered by tests so a future change canno
 
 ---
 
+## 6b. Step A — measurement maths, cross-checked against an independent implementation
+
+The tests before this point proved the engine produced *something* sane. They could not
+prove the *numbers attached to it* were right, and a meter that lies is worse than no
+meter. So the measurement code was checked against an outside reference rather than
+against itself.
+
+Implemented (`src/nux_engine/Measurements.cpp`): peak / RMS / true peak (4x oversampled),
+ITU-R BS.1770-4 loudness and LRA, THD and THD+N, SNR, stereo width, DC offset, channel
+correlation, crosstalk, and a Hann-windowed FFT with parabolic interpolation.
+
+Loudness was validated against **ffmpeg's `ebur128` filter**, which is libebur128 — an
+independent BS.1770 implementation, not our own code:
+
+| Signal (1 kHz, 48 kHz) | libebur128 | NUX |
+|---|---|---|
+| 0 dBFS stereo | 0.0 LUFS | +0.0067 |
+| 0 dBFS mono | -3.0 LUFS | -3.0 |
+| -6 dBFS stereo | -6.0 LUFS | -6.0 |
+| -20 dBFS stereo | -20.0 LUFS | -20.0 |
+| -20 dBFS mono | -23.0 LUFS | -23.0 |
+
+Five real bugs were found and fixed by this work, none of which the old tests could have
+caught:
+
+1. The `-0.691` offset was applied twice (it is already inside the block loudness formula).
+2. K-weighting was approximated rather than implemented; error was 0.73 LU (-20.73 vs -20.00).
+3. `getMagnitudeAt` snapped to the nearest FFT bin — about 1.4 dB of error on a pure tone.
+4. Crosstalk was reported as an absolute level instead of a ratio.
+5. The mono signal generator wrote past the end of the buffer (heap overflow).
+
+The methods and their tolerances are written up in `docs/AUDIO_MEASUREMENT_METHODS.md`.
+These measurements are implemented, not calibrated — see section 10.
+
+---
+
+## 6c. Step B — round trip, and a rule about honesty (10 groups)
+
+Range tests prove a processor does something; a round trip proves a **signal survives the
+journey**. `src/nux_engine/RoundTrip.cpp` plays a known tone and measures what comes back.
+
+The important part is not the DSP, it is the reporting. Every result carries a
+`Verification` level, and the levels are ordered so that a weak claim can never be
+mistaken for a strong one:
+
+```
+notPerformed  <  skipped  <  simulated  <  virtualDevice  <  physicalDevice
+```
+
+Three rules are pinned by tests, because they are exactly the rules it is tempting to
+break when you are impatient for a green tick:
+
+- **A simulated round trip never reports itself as hardware.** Feeding a generated buffer
+  straight back into a generated buffer is a software test. It is labelled `simulated`.
+- **A skipped round trip is never judged a pass.** No device means the verdict is
+  `skipped`, not "everything is fine".
+- **A tone that comes back the wrong frequency, or at the wrong level beyond tolerance,
+  fails** — the judge compares against the injected frequency, level and the level of the
+  returned signal, with a tolerance object rather than a magic number.
+
+Covered: all 11 signal types, frequency preservation, mono and stereo, gain accuracy,
+level tolerance, and the verification ladder itself. The device round trip currently
+returns `skipped` on this machine, which is the honest answer when no capture device is
+driven — see step C.
+
+---
+
 ## 7. WASAPI loopback capture — investigated, not supported
 
 The prompt asked to investigate Windows WASAPI loopback capture and implement it if
@@ -231,13 +301,58 @@ Everything in this section needs a machine with a sound card. The checklist is i
 
 ---
 
+## 10b. Two Windows faults that had been hiding each other
+
+This is recorded in full because the way it failed is more instructive than the fix.
+
+For some time the Windows CI job reported a passing test step while running **no tests at
+all**. `enable_testing()` was missing from the CMake files, so `ctest` found zero tests and
+returned success. That silence then concealed a second, unrelated fault: once ctest was
+made to actually run the tests, Windows segfaulted before the first test could even print
+its name.
+
+The crash affected exactly the groups that construct an `AudioEngine`:
+
+```
+NUX_engine_rendering   ***Exception: SegFault  0.03 sec
+NUX_audio_device       ***Exception: SegFault  0.03 sec
+NUX_offline_audio      ***Exception: SegFault  0.03 sec
+NUXTests (full)        ***Exception: SegFault
+```
+
+The cause was not logic. It was object size:
+
+```
+sizeof(AudioEngine) = 434,576 bytes (Linux) / 447,584 bytes (Windows)  =  ~424-437 KB
+default stack:       Windows 1 MB   |   Linux 8 MB
+```
+
+Every test declared `AudioEngine engine;` **on the stack**. On Windows that single object
+took 43% of the stack and the first engine test overflowed it immediately; on Linux there
+was 8 MB of room, so 104 groups passed locally for days while Windows never got past the
+starting line.
+
+Fixed by allocating all 22 test engines on the heap, plus a test that asserts
+`sizeof(AudioEngine)` stays under half a Windows stack, so the next person to grow the
+engine sees the number instead of rediscovering the crash.
+
+Result: Windows Debug **15/15 ctest pass**, JUCE leak detector clean; Linux 114 groups,
+15/15. The lesson generalises past this bug - *a test suite that reports success without
+running anything will hide the next fault too*, which is why the CI step now throws unless
+the output actually contains `All NUX tests passed`.
+
+---
+
 ## 11. How to reproduce
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_PARALLEL_LEVEL=1
-cmake --build build --target NUXTests NUXTestGain NUXTestTone -j1
-./build/tests/NUXTests_artefacts/Release/NUXTests
+cmake --build build --target NUXTests -j1
+ctest --test-dir build --output-on-failure
 ```
+
+`ctest` runs 15 entries: 14 per-group tests and the full suite. A single group can be run
+directly with `NUXTests --only="round trip"`, and `--list` shows the groups.
 
 The suite prints `All NUX tests passed.` on success. The device inventory line in
 section 5 is printed by the `Probing the real machine` test and will differ per machine -
@@ -247,7 +362,18 @@ that is the point of it.
 
 ## 12. What to do next
 
-1. Run the suite on a Windows machine with a real sound card. Compare the device
+The Virtual Audio Lab is agreed in four stages, in this order, because each one can only
+be trusted if the stage before it is already trustworthy:
+
+| Stage | Status |
+|---|---|
+| Offline tests (no device) | ✅ done |
+| Step A - measurement maths | ✅ done, cross-checked against libebur128 |
+| Step B - software round trip + verification levels | ✅ done |
+| Step C - real speaker and microphone on a Windows PC | ⏳ needs a physical machine |
+| Step D - ASIO driver | ⏳ last, and only with a real driver |
+
+1. Run the suite on a Windows machine with a real sound card (step C). Compare the device
    inventory line against what Windows shows.
 2. Work through `docs/hardware-checklist.md` with speakers and a microphone.
 3. Install VB-CABLE and repeat the loopback comparison described in section 7.

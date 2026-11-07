@@ -132,6 +132,16 @@ public:
             {
                 if (auto* main = mainWindow->getMainComponent())
                     report (main->runDeviceReport());
+
+                // --device-report is a reporting mode, not a demo mode: it prints and
+                // exits. Without this the application opened its window and then idled
+                // in the message loop forever, which is what wedged the Windows CI job
+                // on that step. A reporting flag must never leave a process running.
+                if (! args.contains ("--screenshot"))
+                    juce::Timer::callAfterDelay (200, []
+                    {
+                        juce::JUCEApplication::quit();
+                    });
             }
 
             if (args.contains ("--audio-settings") && mainWindow != nullptr)

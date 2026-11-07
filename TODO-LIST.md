@@ -1,7 +1,7 @@
 # NUX DAW — ඉතුරු වැඩ ලැයිස්තුව
 
-> **යාවත්කාලීනය:** 2026-11-07 · branch `feature/audio-testing` · `99c12ed`
-> **තත්වය:** 104 test groups pass (Linux/Release). Windows CI segfault එකක් විමර්ශනය වෙමින්.
+> **යාවත්කාලීනය:** 2026-11-07 · branch `feature/audio-testing` · `02f64b6`
+> **තත්වය:** 114 test groups pass (Linux Release), Windows Debug + Release 15/15 ctest pass. Segfault එක විසඳා ඇත.
 
 මේක **කේතයේ ඇත්ත තත්වය** බලලා හදපු ලැයිස්තුවක්. මම හැම පේළියක්ම code එකේ බලලා තමයි ලියන්නේ.
 "✅" = compile වෙලා, test වෙලා, වැඩ කරනවා. "⬜" = නෑ. "🟡" = තියෙනවා නමුත් අසම්පූර්ණ.
@@ -12,7 +12,7 @@
 
 | # | කාර්යය | සටහන | තත්ත්වය |
 |---|---|---|---|
-| 0.1 | **Windows CI segfault එක හොයාගන්න** | `NUXTests` Windows එකේ `Exception: SegFault 2.68s`. Linux එකේ groups 13ම pass. `ba4e237` (මගේ අලුත් code එකට කලින්) එකේත් crash වුණා → **කලින් සැඟවුණු Windows-only bug එකක්**. Unbuffered output + `--only` bisect දැම්මා | 🔴 විමර්ශනයේ |
+| 0.1 | **Windows CI segfault එක හොයාගන්න** | ✅ **විසඳා ඇත.** හේතුව logic bug එකක් නෙවෙයි — `sizeof(AudioEngine)` = **447,584 bytes (Windows)**. Tests stack එකේ `AudioEngine engine;` හැදුවා → Windows stack 1 MB → overflow. Linux 8 MB නිසා පෙනුණේ නෑ. Heap එකට මාරු කළා + size guard test එකක් | ✅ |
 | 0.2 | **`feature/audio-testing` සඳහා PR එකක් අරින්න** | Branch එකේ commits 5ක්, PR එකක් තාම නෑ. PR #3 (`feature/vst3-hosting`) වෙනම | ⬜ |
 | 0.3 | Merge order එක විසඳන්න | #1 (`v0.3-foundation`) → #2 (`audio-clips`) → #3 (`vst3-hosting`) → audio-testing. Branches stack වෙලා තියෙනවා | ⬜ |
 
@@ -36,7 +36,7 @@
 | # | පියවර | තත්ත්වය |
 |---|---|---|
 | 1.9 | **Step A — measurement maths + known-answer tests** | ✅ **අවසන්** (`99c12ed`) — 20 groups, bugs 5ක් හම්බුණා |
-| 1.10 | **Step B — virtual device round-trip**: generate → device → capture → measure → compare | ⬜ ඊළඟට. Step A එකේ measurements පාවිච්චි කරනවා |
+| 1.10 | **Step B — virtual device round-trip**: generate → device → capture → measure → compare | ✅ **software round trip අවසන්** (`02f64b6`) — 10 groups, `Verification` ladder. Device round trip එක `skipped` return කරනවා (capture drive කරන්නේ නෑ) → Step C එකේදී |
 | 1.11 | Step C — real speaker/mic on Windows PC | ⬜ ඔයාගේ hardware එක ඕන |
 | 1.12 | Step D — ASIO (අන්තිමට) | ⬜ |
 

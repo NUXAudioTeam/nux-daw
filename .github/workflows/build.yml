@@ -81,9 +81,19 @@ jobs:
         run: |
           # A hosted runner has no sound card, but this shows what the Windows device
           # enumeration actually reports - useful for the test report.
+          # A reporting flag must exit on its own. Belt and braces: the job used to hang
+          # here forever when the app opened its window and idled, so the step now has
+          # its own deadline and kills the process rather than burning the job timeout.
           $exe = "build/NUX_artefacts/Release/NUX DAW.exe"
           if (Test-Path $exe) {
-            & $exe --device-report 2>&1 | Write-Host
+            $out = Join-Path $env:RUNNER_TEMP "device-report.txt"
+            $p = Start-Process -FilePath $exe -ArgumentList "--device-report" -PassThru `
+                               -RedirectStandardOutput $out -RedirectStandardError "$out.err" -NoNewWindow
+            if (-not $p.WaitForExit(120000)) {
+              $p.Kill()
+              Write-Host "::warning::--device-report did not exit within 120 s and was killed."
+            }
+            if (Test-Path $out) { Get-Content $out | Write-Host }
           }
 
       - name: Publish the test output
@@ -190,7 +200,10 @@ jobs:
         run: |
           # A CI runner has no sound card. This records what the engine actually sees,
           # which is exactly the situation AUDIO_TEST_REPORT.md describes.
-          ./build/NUX_artefacts/Release/"NUX DAW" --device-report 2>&1 || true
+          # Deadline for the same reason as on Windows: a reporting flag that idles
+          # would otherwise hang the job until the global timeout.
+          timeout 120 ./build/NUX_artefacts/Release/"NUX DAW" --device-report 2>&1 \
+            || echo "::warning::the device report did not finish within 120 s"
 
       - name: Publish the test output
         if: always()

@@ -49,8 +49,9 @@ Screenshots of every workspace live in [`docs/screenshots/`](docs/screenshots).
 
 **Audio testing status:** see [`AUDIO_TEST_REPORT.md`](AUDIO_TEST_REPORT.md) for exactly
 what has been verified, what was simulated, and what still needs real hardware. The short
-version: the DSP and file I/O are tested offline (84 test groups); **no physical audio
-device has been tested**, because the build machine has none.
+version: the DSP and file I/O are tested offline (114 test groups, run by ctest as 15
+entries); **no physical audio device has been tested**, because the build machine has
+none.
 
 ---
 
