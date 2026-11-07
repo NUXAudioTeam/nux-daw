@@ -210,7 +210,13 @@ phase**, on every recording. It took a threaded test plus TSan to see it.
 | `ctest` | **19/19 passed** |
 | Full suite under ThreadSanitizer | **165 groups, 18 suites, 0 races, exit 0** |
 | Pre-fix demonstration (section 2) | 5 of the new groups failed, numbers recorded above |
-| Windows Debug / Release, Linux Release, Linux TSan CI | recorded in the PR once the runs finish |
+| **CI run `42386678210`** · Linux Release | ✅ `100% tests passed out of 19` |
+| **CI** · Linux ThreadSanitizer | ✅ `Ran 18 group(s)`, `All NUX tests passed.`, **0 races** |
+| **CI** · Windows Debug + leak detector | ✅ success |
+| **CI** · Windows Release | ✅ success |
+
+The only `WARNING: ThreadSanitizer` string in the TSan log is the workflow echoing its own
+`grep`; no sanitizer report was produced.
 
 A clean TSan run means no race was **observed** on the paths these tests exercise. It is
 not proof that the recorder is race-free, and it says nothing about a real driver's callback
