@@ -81,7 +81,8 @@ public:
                             || args.contains ("--undo-self-test")
                             || args.contains ("--record-self-test")
                             || args.contains ("--instrument-self-test")
-                            || args.contains ("--audio-settings");
+                            || args.contains ("--audio-settings")
+                            || args.contains ("--device-report");
 
         if (wantsDemo)
         {
@@ -125,6 +126,12 @@ public:
                             + (applied ? " applied" : " FAILED"));
                     }
                 }
+            }
+
+            if (args.contains ("--device-report") && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                    report (main->runDeviceReport());
             }
 
             if (args.contains ("--audio-settings") && mainWindow != nullptr)

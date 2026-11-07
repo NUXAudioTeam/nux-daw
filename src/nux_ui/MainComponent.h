@@ -87,6 +87,11 @@ public:
     /** Opens the audio settings window for a screenshot / smoke test. */
     void showAudioSettingsForDemo (bool startTestTone);
 
+    /** Prints what audio hardware and drivers this machine reports, then returns the
+        text. Used by CI and bug reports: it is the single most useful thing to know
+        when audio "does not work". */
+    juce::String runDeviceReport();
+
     /** The audio settings panel, when the window is open. */
     juce::Component* getAudioSettingsComponentForDemo() const;
 

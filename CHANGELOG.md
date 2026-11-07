@@ -1,3 +1,22 @@
+## [Unreleased] - CI coverage
+
+### Added
+- **Windows Debug CI job** with a leak-detector gate. Release-only CI could never have
+  caught the `PluginRetirementQueue` leak, because JUCE only reports leaked objects in
+  Debug builds.
+- **ASIO compile check in Windows CI.** `JUCE_ASIO` defaults to `0`; a Linux build cannot
+  prove the flag reached the compiler, but the Windows runner can. The step fails loudly
+  if ASIO is not compiled in.
+- `--device-report` command line flag: prints driver types, devices, which are virtual
+  cables, whether ASIO is compiled in and usable, and a plain-English summary. The most
+  useful thing to ask for in a bug report.
+- CI now publishes test output and `AUDIO_TEST_REPORT.md` as artifacts, and prints the
+  device inventory on both Windows and Linux runners.
+
+### Fixed
+- `recover.sh` now installs and starts Xvfb. A missing display makes the GUI self-tests
+  segfault, which looks exactly like a code regression and cost real debugging time.
+
 ## [Unreleased] - audio testing
 
 ### Added

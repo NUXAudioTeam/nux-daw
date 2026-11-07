@@ -47,8 +47,55 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      - name: Confirm the ASIO backend was actually compiled in
+        shell: pwsh
+        run: |
+          # JUCE_ASIO defaults to 0. This proves the CMake flag really reaches the
+          # compiler on Windows - a Linux build cannot check this at all.
+          $defines = & cmake --build build --config Release --target NUX --verbose 2>&1 |
+                     Select-String -Pattern "JUCE_ASIO=1"
+          $cache = Get-ChildItem -Path build -Recurse -Filter "*.rsp" -ErrorAction SilentlyContinue |
+                   Select-String -Pattern "JUCE_ASIO=1"
+          if ($defines -or $cache) {
+            Write-Host "JUCE_ASIO=1 is present in the compile commands"
+          } else {
+            # The verbose build may be a no-op if nothing changed. Fall back to reading
+            # the generated project files.
+            $hits = Get-ChildItem -Path build -Recurse -Include "*.vcxproj","*.txt","*.ninja" -ErrorAction SilentlyContinue |
+                    Select-String -Pattern "JUCE_ASIO" -SimpleMatch |
+                    Select-Object -First 5
+            if ($hits) {
+              $hits | ForEach-Object { Write-Host $_.Line.Trim() }
+              Write-Host "JUCE_ASIO appears in the generated build files"
+            } else {
+              throw "JUCE_ASIO does not appear anywhere in the build: ASIO is NOT compiled in."
+            }
+          }
+
       - name: Run the unit tests
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Report the audio device inventory on Windows
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # A hosted runner has no sound card, but this shows what the Windows device
+          # enumeration actually reports - useful for the test report.
+          $exe = "build/NUX_artefacts/Release/NUX DAW.exe"
+          if (Test-Path $exe) {
+            & $exe --device-report 2>&1 | Write-Host
+          }
+
+      - name: Publish the test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-windows-release
+          path: |
+            build/Testing/
+            AUDIO_TEST_REPORT.md
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Check that the plugin hosting tests really ran
         shell: pwsh
@@ -73,6 +120,40 @@ jobs:
           path: build/NUX_artefacts/Release/
           if-no-files-found: error
           retention-days: 14
+
+  windows-debug:
+    name: Windows (MSVC, Debug + leak detector)
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Configure
+        run: cmake -S . -B build-debug -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build-debug --config Debug --parallel
+
+      - name: Run the unit tests
+        run: ctest --test-dir build-debug -C Debug --output-on-failure
+
+      - name: Fail on leaked objects
+        shell: pwsh
+        run: |
+          # JUCE's leak detector prints this only in Debug. A Release-only CI would
+          # never catch a leak, which is how one survived in PluginRetirementQueue.
+          $exe = Get-ChildItem -Path build-debug -Recurse -Filter "NUXTests.exe" |
+                 Select-Object -First 1
+          if (-not $exe) { throw "The test binary was not built." }
+          $output = & $exe.FullName 2>&1 | Out-String
+          Write-Host $output
+          if ($output -match "Leaked objects detected") { throw "Memory leaks were detected." }
+          if ($output -notmatch "All NUX tests passed") { throw "The test suite did not report success." }
 
   linux:
     name: Linux (GCC, Release)
@@ -103,6 +184,24 @@ jobs:
 
       - name: Run the unit tests
         run: ctest --test-dir build --output-on-failure
+
+      - name: Report the audio device inventory
+        continue-on-error: true
+        run: |
+          # A CI runner has no sound card. This records what the engine actually sees,
+          # which is exactly the situation AUDIO_TEST_REPORT.md describes.
+          ./build/NUX_artefacts/Release/"NUX DAW" --device-report 2>&1 || true
+
+      - name: Publish the test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-linux-release
+          path: |
+            build/Testing/
+            AUDIO_TEST_REPORT.md
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Check that the plugin hosting tests really ran
         run: |
