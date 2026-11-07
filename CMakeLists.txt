@@ -79,6 +79,7 @@ target_sources(NUX PRIVATE
     src/nux_core/InsertParameters.cpp
     src/nux_core/UndoHistory.cpp
     src/nux_core/TakePlacement.cpp
+    src/nux_core/RecordingRecovery.cpp
     src/nux_core/TrackModel.cpp)
 
 target_include_directories(NUX PRIVATE src)

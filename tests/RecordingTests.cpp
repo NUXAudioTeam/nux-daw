@@ -61,7 +61,7 @@ public:
             const auto file = folder.getChildFile ("take-1.wav");
             juce::String error;
 
-            expect (recorder.start (file, 4.0, error), "Recording failed to start: " + error);
+            expect (recorder.start (file, 4.0, 0, error), "Recording failed to start: " + error);
             expect (recorder.isRecording());
             expect (file.existsAsFile());
 
@@ -107,7 +107,7 @@ public:
             const auto file = folder.getChildFile ("take-2.wav");
             juce::String error;
 
-            expect (recorder.start (file, 12.5, error), error);
+            expect (recorder.start (file, 12.5, 0, error), error);
             feedTone (recorder, 10, 256, 220.0);
             recorder.stop();
 
@@ -138,7 +138,7 @@ public:
 
             const auto file = folder.getChildFile ("take-mono.wav");
             juce::String error;
-            expect (recorder.start (file, 0.0, error), error);
+            expect (recorder.start (file, 0.0, 0, error), error);
 
             juce::AudioBuffer<float> mono (1, 512);
 
@@ -185,7 +185,7 @@ public:
 
             const auto file = folder.getChildFile ("take-silent.wav");
             juce::String error;
-            expect (recorder.start (file, 0.0, error), error);
+            expect (recorder.start (file, 0.0, 0, error), error);
 
             for (int block = 0; block < 40; ++block)
                 recorder.pushInput (channels, 0, 512);   // zero input channels
@@ -203,7 +203,7 @@ public:
 
             const auto file = folder.getChildFile ("take-abort.wav");
             juce::String error;
-            expect (recorder.start (file, 0.0, error), error);
+            expect (recorder.start (file, 0.0, 0, error), error);
             expect (file.existsAsFile());
 
             recorder.abort();
@@ -218,10 +218,10 @@ public:
             recorder.prepare (44100.0, 512, 2);
 
             juce::String error;
-            expect (recorder.start (folder.getChildFile ("take-a.wav"), 0.0, error), error);
+            expect (recorder.start (folder.getChildFile ("take-a.wav"), 0.0, 0, error), error);
 
             juce::String secondError;
-            expect (! recorder.start (folder.getChildFile ("take-b.wav"), 0.0, secondError));
+            expect (! recorder.start (folder.getChildFile ("take-b.wav"), 0.0, 0, secondError));
             expect (secondError.isNotEmpty(), "The refusal must explain itself");
 
             recorder.stop();

@@ -119,6 +119,10 @@ private:
 
     void toggleRecording();
     void placeRecordedTake (const AudioEngine::RecordedTake& take);
+
+    /** Repairs takes whose WAV header was never finalised, which is what a crash or a power
+        loss mid-recording leaves behind. Returns how many were recovered. */
+    int recoverInterruptedRecordings();
     static bool fileIsInsideFolder (const juce::File& file, const juce::File& folder);
 
     void performUndo();

@@ -1,3 +1,30 @@
+## [Unreleased] - recording reliability: seven ways a take could be lost, and the race behind them
+
+### Added
+
+- **`nux_core/RecordingRecovery.{h,cpp}`**: takes whose WAV header was never finalised - the
+  signature of a crash mid-recording - are repaired from the actual file size instead of
+  opening as silence. Scanned automatically at startup.
+- Takes that were cut short by the input device disappearing are finalised, kept, and placed
+  by the UI instead of being thrown away.
+- 18 test groups covering overrun, the stop handshake, device changes, track arming, write
+  failures, long takes and header recovery.
+
+### Fixed
+
+- **Silent audio loss on overrun.** The ring buffer overwrote unread audio and reported
+  nothing; 786,432 samples disappeared in the test that proves it. Drops are now counted and
+  surfaced.
+- **The tail of every take could be lost** when a callback was mid-flight during `stop()`.
+- **A device change mid-take changed the take's reported length** (1.161 s became 0.533 s),
+  placing the clip at half its real length.
+- **`prepare()` resized the ring buffer under a live audio callback.**
+- **Failed writes were reported as saved takes.** `stop()` now reads the file back before
+  claiming success.
+- **The take landed on whichever track was armed at stop time**, not the one it started on.
+- **A one-byte data race between the audio thread and the file writer** in `AudioBuffer`'s
+  internal cleared flag, found by ThreadSanitizer, present since recording was added.
+
 ## [Unreleased] - take placement extracted and tested, and two undo steps that were one
 
 ### Added

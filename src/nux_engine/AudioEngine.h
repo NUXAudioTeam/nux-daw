@@ -208,9 +208,30 @@ public:
         double startStep = 0.0;
         double lengthSeconds = 0.0;
         int trackIndex = -1;
+
+        /** False when the file could not be finalised: the take must not be placed, and
+            `error` says what went wrong. */
+        bool saved = false;
+
+        /** Samples the audio thread had to drop because the writer fell behind. A take with
+            gaps is still a take, but the user has to be told. */
+        juce::int64 droppedSamples = 0;
+
+        juce::String error;
     };
 
+    /** Stops the input recorder and returns the take. `saved` is only true when the file was
+        finalised and reads back the samples that were written. */
     RecordedTake stopInputRecording();
+
+    /** A take that was cut short by the input device going away (unplugged, driver reset).
+        The audio captured up to that point is finalised and kept; the caller decides whether
+        to place it. Empty when there is nothing pending. */
+    RecordedTake takeInterruptedRecording();
+    bool hasInterruptedRecording() const noexcept
+    {
+        return interruptedTakePending.load (std::memory_order_acquire);
+    }
 
     bool isInputRecording() const noexcept { return inputRecorder.isRecording(); }
     float getInputLevel() const noexcept { return inputRecorder.getInputLevel(); }
@@ -221,6 +242,12 @@ public:
 
     /** True when the device actually has input channels available. */
     bool hasAudioInput() const;
+
+    /** Samples dropped during the current (or last) take because the writer fell behind. */
+    juce::int64 getRecordingDroppedSamples() const noexcept
+    {
+        return inputRecorder.getDroppedSamples();
+    }
 
     //==============================================================================
     // Test tone (proves audio reaches the device)
@@ -345,6 +372,10 @@ private:
 
     AudioClipStore clipStore;
     InputRecorder inputRecorder;
+
+    /** A take cut short by the device disappearing, waiting for the UI to collect it. */
+    RecordedTake interruptedTake;
+    std::atomic<bool> interruptedTakePending { false };
     TestToneGenerator testTone;
     std::array<std::atomic<float>, 2> outputPeaks { { {0.0f}, {0.0f} } };
     std::atomic<int> armedTrackIndex { -1 };
