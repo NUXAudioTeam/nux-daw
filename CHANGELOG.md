@@ -1,3 +1,25 @@
+## [Unreleased] - device selection and the device round trip
+
+### Added
+
+- **Device selection**: `DeviceSelection.{h,cpp}` lists the platform's devices, flags
+  virtual cables, pairs the two halves of one, and refuses a pairing that cannot work
+  (no input, missing device, half on another driver) with a reason that names the device.
+- **`AudioEngine::applyDeviceChoice()`** opens exactly the chosen output/input pair instead
+  of the system default, and returns the driver's own error text when it fails.
+- **Virtual Audio Lab UI** in AUDIO SETTINGS: output/input choosers, `[virtual]` labels,
+  OPEN PAIR and ROUND TRIP, with the verification level printed next to the measurement.
+- **`VirtualLoopback.{h,cpp}`**: plays a known tone into a chosen output, captures the
+  chosen input, trims the leading silence and measures what came back. A missing device
+  produces `skipped` with a reason; it can never produce a pass.
+- 13 test groups pinning the selection and honesty rules, registered with ctest.
+
+### Fixed
+
+- The suite reported one fewer group than it declared. `PluginHostTests` declares a group
+  that only runs when the VST3 test plugins are missing, so the count now differs by one by
+  design; documented in the test itself.
+
 ## [Unreleased] - Virtual Audio Lab, step A (measurement maths)
 
 ### Added

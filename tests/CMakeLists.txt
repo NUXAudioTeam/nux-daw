@@ -16,6 +16,7 @@ target_sources(NUXTests PRIVATE
     DeviceProbeTests.cpp
     MeasurementTests.cpp
     RoundTripTests.cpp
+    DeviceSelectionTests.cpp
     ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/InsertParameters.cpp
@@ -28,6 +29,8 @@ target_sources(NUXTests PRIVATE
     ../src/nux_engine/Measurements.cpp
     ../src/nux_engine/TestSignals.cpp
     ../src/nux_engine/RoundTrip.cpp
+    ../src/nux_engine/DeviceSelection.cpp
+    ../src/nux_engine/VirtualLoopback.cpp
     ../src/nux_engine/AudioEngine.cpp
     ../src/nux_engine/ChannelStrip.cpp
     ../src/nux_engine/PluginManager.cpp
@@ -82,7 +85,8 @@ set(NUX_TEST_GROUPS
     "offline audio"
     "device inventory"
     "measurements"
-    "audio round trip")
+    "audio round trip"
+    "device selection")
 
 foreach (group IN LISTS NUX_TEST_GROUPS)
     string(REPLACE " " "_" slug "${group}")

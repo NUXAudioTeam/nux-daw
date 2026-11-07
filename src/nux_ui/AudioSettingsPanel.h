@@ -13,7 +13,10 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "../nux_engine/AudioEngine.h"
+#include "../nux_engine/DeviceSelection.h"
+#include "../nux_engine/VirtualLoopback.h"
 #include "Theme.h"
+#include <vector>
 
 namespace nux
 {
@@ -38,6 +41,10 @@ private:
     void toggleTestTone();
     void updateTestToneButton();
 
+    void refreshLabDevices();
+    void openSelectedDevice();
+    void runRoundTrip();
+
     AudioEngine& engine;
 
     juce::AudioDeviceSelectorComponent selector;
@@ -51,6 +58,18 @@ private:
     juce::Label testToneLabel;
 
     juce::Label deviceWarning;
+
+    // The Virtual Audio Lab: pick a device pair, open it, and prove a signal survives the
+    // trip. Kept next to the device selector because that is the job it does.
+    juce::Label labTitle;
+    juce::Label labHint;
+    juce::ComboBox outputChooser;
+    juce::ComboBox inputChooser;
+    juce::TextButton openDeviceButton { "OPEN PAIR" };
+    juce::TextButton roundTripButton { "ROUND TRIP" };
+    juce::Label labResult;
+
+    std::vector<DeviceOption> labOptions;
 
     juce::Rectangle<int> inputMeterArea;
     juce::Rectangle<int> outputMeterArea;

@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "DeviceSelection.h"
 
 namespace nux
 {
@@ -54,6 +55,56 @@ juce::String AudioEngine::initialiseAudio()
             prepare (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
 
     return lastDeviceError;
+}
+
+juce::String AudioEngine::applyDeviceChoice (const juce::String& typeName,
+                                             const juce::String& outputName,
+                                             const juce::String& inputName)
+{
+    const auto options = listDeviceOptions (deviceManager);
+
+    nux::DeviceChoice choice;
+    choice.typeName = typeName;
+    choice.outputName = outputName;
+    choice.inputName = inputName;
+
+    // A playback-only choice is normal; a round trip is the case that needs both.
+    const auto selection = makeSelection (choice, options, false);
+
+    if (! selection.valid)
+    {
+        lastDeviceError = selection.error;
+        return lastDeviceError;
+    }
+
+    // Stop first: changing the setup under a running callback is how devices get left in
+    // a half-open state. The engine keeps its prepared buffers and re-prepares below.
+    deviceManager.closeAudioDevice();
+
+    auto setup = selection.setup;
+
+    if (inputName.isNotEmpty())
+    {
+        setup.inputDeviceName = inputName;
+        setup.useDefaultInputChannels = true;
+    }
+
+    const auto error = deviceManager.setAudioDeviceSetup (setup, true);
+
+    auto* device = deviceManager.getCurrentAudioDevice();
+    audioReady = device != nullptr;
+    deviceLost.store (false, std::memory_order_release);
+
+    if (! audioReady)
+    {
+        lastDeviceError = error.isNotEmpty() ? error
+                                             : "The selected device did not open.";
+        return lastDeviceError;
+    }
+
+    lastDeviceError.clear();
+    prepare (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
+    return {};
 }
 
 void AudioEngine::shutdownAudio()

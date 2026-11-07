@@ -100,6 +100,10 @@ public:
         {
             // Not a hidden pass: the test says out loud that it could not run. CI builds
             // the NUXTestGain / NUXTestTone targets, so the hosting path is verified there.
+            //
+            // This group only exists when the plugins are missing, which is why a run
+            // reports one fewer group than the file declares. That difference is by
+            // design: with the plugins built, the eight real hosting groups run instead.
             beginTest ("Test plugins are available");
             logMessage ("SKIPPED: the VST3 test plugins were not built, so plugin hosting "
                         "was not verified in this run. Build the NUXTestGain and NUXTestTone targets "

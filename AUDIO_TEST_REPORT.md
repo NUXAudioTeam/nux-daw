@@ -20,6 +20,7 @@ was ever produced or captured by a real device during this run.
 | Offline (device independent) audio tests | ✅ **13 groups, all passed** |
 | Measurement / instrumentation maths (step A) | ✅ **20 groups, all passed** |
 | Software round trip + verification levels (step B) | ✅ **10 groups, all passed** |
+| Device selection + virtual loopback logic (step C plumbing) | ✅ **13 groups, all passed** (logic only) |
 | Windows CI: build Debug + Release | ✅ **builds, 15/15 ctest** (Debug leak check clean) |
 | Simulated input recording | ✅ **7 groups, all passed** |
 | Test tone / metering / device recovery | ✅ **6 groups, all passed** |
@@ -256,6 +257,60 @@ driven — see step C.
 
 ---
 
+## 6d. Step C plumbing — device selection and the device round trip (13 groups)
+
+Two gaps were left after step B, and both were real:
+
+1. NUX opened whatever the system called the default device and offered no way to choose.
+2. Nothing could carry audio out of NUX and back in, so a device round trip could not even
+   be attempted.
+
+Both are now implemented. `src/nux_engine/DeviceSelection.*` answers "which device plays
+and which records", and `src/nux_engine/VirtualLoopback.*` performs the trip: it plays a
+known tone into the chosen output, captures the chosen input, trims the leading silence,
+and measures what came back with the step A instruments.
+
+**What is verified here, and what is not.** The decision logic is verified: pairing a
+virtual cable's two halves, refusing a capture half from a different driver, refusing a
+round trip with no return path, and naming the device that is missing. The audio path
+itself is **not** verified, because this machine has no output, no input and no cable. A
+run here returns:
+
+```
+Result: SKIPPED
+Device round trip skipped: "CABLE Input (VB-Audio Virtual Cable)" is not an output
+device on this machine. It may have been unplugged, or the driver may have renamed it.
+```
+
+That is the correct answer, and it is why the round trip was built this way: a missing
+device produces a reason, never a green tick.
+
+### The rules the 13 groups pin
+
+| Rule | Why it matters |
+|---|---|
+| A virtual cable's halves pair, and nothing else pairs | "CABLE Input" must feed "CABLE Output"; a speaker must never be paired with itself |
+| One device offering both directions is not a pair | some drivers list a single name for both; that is not a loop back |
+| Halves from different drivers are refused | one device cannot be open on two drivers, and the capture would silently be silence |
+| A round trip with no input is refused, not attempted | no return path means no measurement |
+| A missing device is named in the error | "Audio did not work" helps nobody |
+| A virtual pairing says what it does not prove | routing and engine path, not a converter or a speaker |
+| With no devices the result is `skipped` | and it is never `virtualDevice` or `physicalDevice` |
+
+### In the application
+
+AUDIO SETTINGS now has a **VIRTUAL AUDIO LAB** block: an output chooser, an input chooser,
+**OPEN PAIR** (opens exactly that pair through the engine, and shows the driver's own words
+when it refuses) and **ROUND TRIP** (runs the trip and prints the verification level with
+the measurement). Both choosers label virtual devices `[virtual]`, and a cable is
+pre-selected when one is installed.
+
+The honest status of the row it produces is: **not yet run on a machine that has a
+device**. On the build machine it prints SKIPPED, and AUDIO_TEST_REPORT.md keeps saying so
+until a real run replaces it.
+
+---
+
 ## 7. WASAPI loopback capture — investigated, not supported
 
 The prompt asked to investigate Windows WASAPI loopback capture and implement it if
@@ -409,7 +464,7 @@ be trusted if the stage before it is already trustworthy:
 | Offline tests (no device) | ✅ done |
 | Step A - measurement maths | ✅ done, cross-checked against libebur128 |
 | Step B - software round trip + verification levels | ✅ done |
-| Step C - real speaker and microphone on a Windows PC | ⏳ needs a physical machine |
+| Step C - device round trip (virtual cable or real hardware) | 🟡 **built and testable, never run with a device** |
 | Step D - ASIO driver | ⏳ last, and only with a real driver |
 
 1. Run the suite on a Windows machine with a real sound card (step C). Compare the device

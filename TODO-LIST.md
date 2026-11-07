@@ -1,7 +1,7 @@
 # NUX DAW — ඉතුරු වැඩ ලැයිස්තුව
 
 > **යාවත්කාලීනය:** 2026-11-07 · branch `feature/audio-testing` · `02f64b6`
-> **තත්වය:** 114 test groups pass (Linux Release), Windows Debug + Release 15/15 ctest pass. Segfault එක විසඳා ඇත.
+> **තත්වය:** 127 groups pass, ctest **16/16** (Linux Release). Device selection + virtual loopback runner එකතු විය.
 
 මේක **කේතයේ ඇත්ත තත්වය** බලලා හදපු ලැයිස්තුවක්. මම හැම පේළියක්ම code එකේ බලලා තමයි ලියන්නේ.
 "✅" = compile වෙලා, test වෙලා, වැඩ කරනවා. "⬜" = නෑ. "🟡" = තියෙනවා නමුත් අසම්පූර්ණ.
@@ -15,6 +15,7 @@
 | 0.1 | **Windows CI segfault එක හොයාගන්න** | ✅ **විසඳා ඇත.** හේතුව logic bug එකක් නෙවෙයි — `sizeof(AudioEngine)` = **447,584 bytes (Windows)**. Tests stack එකේ `AudioEngine engine;` හැදුවා → Windows stack 1 MB → overflow. Linux 8 MB නිසා පෙනුණේ නෑ. Heap එකට මාරු කළා + size guard test එකක් | ✅ |
 | 0.2 | **`feature/audio-testing` සඳහා PR එකක් අරින්න** | Branch එකේ commits 5ක්, PR එකක් තාම නෑ. PR #3 (`feature/vst3-hosting`) වෙනම | ⬜ |
 | 0.3 | Merge order එක විසඳන්න | #1 (`v0.3-foundation`) → #2 (`audio-clips`) → #3 (`vst3-hosting`) → audio-testing. Branches stack වෙලා තියෙනවා | ⬜ |
+| 0.4 | ~~`beginTest` 115 vs report 114~~ | ✅ **විසඳුණා — bug එකක් නෙවෙයි.** `PluginHostTests` එකේ group එකක් තියෙන්නේ plugins **නැති විට** විතරයි. Plugins build කළොත් 8 real groups run වෙනවා, එකක් අඩුවෙන් පේනවා. Design එකෙන් එහෙමයි | ✅ |
 
 ---
 
@@ -24,7 +25,7 @@
 |---|---|---|
 | 1.1 | Offline DSP testing (440 Hz, levels, clipping, ramps, stereo, block sizes, sample rates) | ✅ 13 groups |
 | 1.2 | Device detection + VB-CABLE හඳුනාගැනීම + error messages | ✅ 6 groups |
-| 1.3 | **Virtual device එකක් UI එකෙන් තෝරන්න** | 🟡 **detection තියෙනවා, selection UI නෑ.** Engine එක default device එක auto-open කරනවා. VB-CABLE install කළත් user ට තෝරන්න විදියක් නෑ |
+| 1.3 | **Virtual device එකක් UI එකෙන් තෝරන්න** | ✅ **අවසන්.** AUDIO SETTINGS එකේ VIRTUAL AUDIO LAB block එක: output/input chooser, `[virtual]` label, OPEN PAIR (engine එකට apply), ROUND TRIP. `AudioEngine::applyDeviceChoice()` |
 | 1.4 | Recording — simulated input, WAV writing, integrity | ✅ (simulated) |
 | 1.5 | Recording — **real mic** එකෙන් | ❌ hardware නැහැ — unverified |
 | 1.6 | ASIO detect + compile | ✅ Windows CI එකේ compile වෙනවා (proven) |
@@ -36,7 +37,7 @@
 | # | පියවර | තත්ත්වය |
 |---|---|---|
 | 1.9 | **Step A — measurement maths + known-answer tests** | ✅ **අවසන්** (`99c12ed`) — 20 groups, bugs 5ක් හම්බුණා |
-| 1.10 | **Step B — virtual device round-trip**: generate → device → capture → measure → compare | ✅ **software round trip අවසන්** (`02f64b6`) — 10 groups, `Verification` ladder. Device round trip එක `skipped` return කරනවා (capture drive කරන්නේ නෑ) → Step C එකේදී |
+| 1.10 | **Step B — virtual device round-trip**: generate → device → capture → measure → compare | ✅ **software 10 groups** + ✅ **device runner එක ලියලා ඉවරයි** (13 groups, `VirtualLoopback.cpp`). ඒත් **device එකක් එක්ක කවදාවත් run කරලා නෑ** → SKIPPED |
 | 1.11 | Step C — real speaker/mic on Windows PC | ⬜ ඔයාගේ hardware එක ඕන |
 | 1.12 | Step D — ASIO (අන්තිමට) | ⬜ |
 
