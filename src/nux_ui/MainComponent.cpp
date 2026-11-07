@@ -573,6 +573,12 @@ juce::String MainComponent::runInstrumentSelfTest (const juce::File& pluginFolde
     if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
         return "Track " + juce::String (trackIndex) + " does not exist";
 
+    // On a machine with no audio device the graph was never prepared, and an
+    // unprepared engine renders nothing. Prepare an offline graph so the test
+    // measures real DSP rather than an empty one.
+    if (! engine.isAudioAvailable())
+        engine.prepareForOfflineRendering (44100.0, 512, 2);
+
     pluginManager.addSearchPaths (juce::FileSearchPath (pluginFolder.getFullPathName()));
     pluginManager.scanNow (juce::FileSearchPath (pluginFolder.getFullPathName()), report);
 
@@ -868,6 +874,11 @@ juce::String MainComponent::runRecordingSelfTest (const juce::File& takeFile,
 
     if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
         return "Track " + juce::String (trackIndex) + " does not exist";
+
+    // Without an audio device the clip store is never prepared and the take cannot be
+    // loaded, so prepare an offline graph first and let the test prove the real path.
+    if (! engine.isAudioAvailable())
+        engine.prepareForOfflineRendering (44100.0, 512, 2);
 
     report.add ("before: track = \"" + state.tracks[(size_t) trackIndex].name
                   + "\", clips = " + juce::String ((int) state.tracks[(size_t) trackIndex].audioClips.size())
