@@ -58,6 +58,11 @@ target_link_libraries(NUXTests PRIVATE
     juce::juce_recommended_warning_flags)
 
 add_test(NAME NUXTests COMMAND NUXTests)
+set_tests_properties(NUXTests PROPERTIES
+    # A full run takes a few seconds; this stops a hung test blocking CI forever.
+    TIMEOUT 900
+    FAIL_REGULAR_EXPRESSION "FAILED!!")
+
 
 # ==============================================================================
 # Test plugins: real VST3 binaries built from JUCE, used to verify that NUX can

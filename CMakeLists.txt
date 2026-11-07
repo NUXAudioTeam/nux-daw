@@ -132,5 +132,9 @@ endif()
 option(NUX_BUILD_TESTS "Build the NUX unit tests" ON)
 
 if (NUX_BUILD_TESTS)
+    # Without enable_testing() at the top level, ctest finds no tests at all and
+    # reports "No tests were found!!!" - which CI treated as a pass, so the unit
+    # tests had never actually been run by the workflow.
+    enable_testing()
     add_subdirectory(tests)
 endif()
