@@ -99,7 +99,7 @@
 
 | # | ප්‍රශ්නය | ඇයි අවුල් | විසඳුම |
 |---|---|---|---|
-| 5.1 | **Insert params thread safety** | Audio thread එක `inserts[]` read කරනවා, UI එක ලියනවා lock-free නෙවෙයි | `std::atomic<float>` හෝ lock-free queue |
+| 5.1 | ~~Insert params thread safety~~ | ✅ **විසඳුණා** (`feature/engine-hardening`). Audio thread එක දැන් model එක කියවන්නේ නෑ — `AtomicInsertState` publish/load (release/acquire) හරහා විතරයි. Tests 3කින් pin කළා | ✅ |
 | 5.2 | **`TrackState` එකේ GUI dependency** | `Colour` සඳහා `juce_graphics` include | ARGB `uint32`, conversion UI layer එකේ |
 | 5.3 | **ValueTree එකක් නෑ** | Plain structs + manual `markDirty()`. Undo වැඩ කරනවා නමුත් automation එකට අවහිරයි | `ValueTree` + `UndoManager` migrate |
 | 5.4 | **`-Wfloat-equal` warnings** | `InsertSlot::operator==` | `juce::exactlyEqual` |

@@ -24,6 +24,53 @@
 
 namespace nux
 {
+/** Everything the audio thread needs from one insert slot, as plain data.
+
+    Deliberately a value: the audio thread copies one of these per slot per block and then
+    works from the copy, so nothing it reads can change underneath it. */
+struct InsertView
+{
+    InsertType type = InsertType::none;
+    bool bypassed = false;
+    float p1 = 0.0f;
+    float p2 = 0.0f;
+    float p3 = 0.0f;
+
+    bool isActive() const noexcept { return type != InsertType::none && ! bypassed; }
+};
+
+/** The publish side of one insert slot.
+
+    This replaces an earlier arrangement where the UI thread copied whole `InsertSlot`
+    objects (which own a juce::String) into a buffer the audio thread was reading. That was
+    two bugs wearing one coat: a data race on non-atomic members, and a possible allocation
+    on the audio thread. Both are gone:
+
+      * the model (`TrackState`) is never read by the audio thread at all, only published
+        from it, and
+      * the published fields are independent atomics, written with release and read with
+        acquire, so the audio thread always sees a whole value rather than a torn one.
+
+    The five fields are not published as one transaction. A block may see a new cutoff with
+    the previous resonance - one block of a coefficient change, which is inaudible - but it
+    can never see half of a float, which is a click. */
+struct AtomicInsertState
+{
+    std::atomic<int>   type     { (int) InsertType::none };
+    std::atomic<bool>  bypassed { false };
+    std::atomic<float> p1       { 0.0f };
+    std::atomic<float> p2       { 0.0f };
+    std::atomic<float> p3       { 0.0f };
+
+    /** Message thread: copies the model into the published values. */
+    void publish (const InsertSlot& slot) noexcept;
+
+    /** Audio thread: one consistent-enough snapshot, never a torn read. */
+    InsertView load() const noexcept;
+
+    void clear() noexcept;
+};
+
 /** Parameters shared between the UI thread and the audio thread. */
 struct StripParameters
 {
@@ -31,15 +78,14 @@ struct StripParameters
     std::atomic<float> pan      { 0.0f };
     std::atomic<bool>  muted    { false };
 
-    /** Slot types are published atomically; the full slot data is read by the
-        audio thread from `inserts` and is only rewritten while the engine is idle
-        (an audio callback is never running while the UI edits a slot). */
-    std::array<InsertSlot, constants::maxTrackInserts> inserts {};
-    std::array<std::atomic<int>, constants::maxTrackInserts> insertTypes {};
+    /** The only insert state the audio thread is allowed to see. */
+    std::array<AtomicInsertState, constants::maxTrackInserts> insertState {};
 
     void setInsert (int index, InsertType newType);
     void setInsertParams (int index, float p1, float p2, float p3);
     InsertType getInsertType (int index) const;
+    InsertView getInsertView (int index) const;
+    void publishInsert (int index, const InsertSlot& slot);
     void loadFrom (const TrackState& track);
     void copyTo (TrackState& track) const;
     void clearInserts();
@@ -53,14 +99,14 @@ public:
     void reset();
 
     /** Processes the buffer in place. `slot` describes the desired effect. */
-    void process (juce::AudioBuffer<float>& buffer, const InsertSlot& slot, int numSamples);
+    void process (juce::AudioBuffer<float>& buffer, const InsertView& slot, int numSamples);
 
 private:
-    void configureFor (InsertType newType, const InsertSlot& slot);
-    void processEq (juce::AudioBuffer<float>& buffer, const InsertSlot& slot);
-    void processCompressor (juce::AudioBuffer<float>& buffer, const InsertSlot& slot);
-    void processDelay (juce::AudioBuffer<float>& buffer, const InsertSlot& slot);
-    void processReverb (juce::AudioBuffer<float>& buffer, const InsertSlot& slot);
+    void configureFor (InsertType newType, const InsertView& slot);
+    void processEq (juce::AudioBuffer<float>& buffer, const InsertView& slot);
+    void processCompressor (juce::AudioBuffer<float>& buffer, const InsertView& slot);
+    void processDelay (juce::AudioBuffer<float>& buffer, const InsertView& slot);
+    void processReverb (juce::AudioBuffer<float>& buffer, const InsertView& slot);
 
     double sampleRate = 44100.0;
     int blockSize = 512;

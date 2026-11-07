@@ -5,6 +5,7 @@
    and that a value written by the UI really does change the audio the DSP makes. */
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
+#include <thread>
 #include "../src/nux_core/InsertParameters.h"
 #include "../src/nux_engine/ChannelStrip.h"
 
@@ -117,8 +118,9 @@ public:
                 InsertSlot slot;
                 applyInsertDefaults (slot, InsertType::delay);
                 writeInsertValues (slot, { 50.0, 0.0, (double) mixPercent });   // 50 ms, no feedback
-                params.inserts[0] = slot;
-                params.insertTypes[0].store ((int) InsertType::delay);
+                // Publishing, not writing into the strip's internals: the audio thread
+                // only ever sees these atomic values.
+                params.publishInsert (0, slot);
 
                 juce::AudioBuffer<float> buffer (2, 512);
 
@@ -169,6 +171,114 @@ public:
             expect (delay[2].formatValue (25.0).contains ("%"));
             expect (delay[2].formatValue (25.0).contains ("25"));
         }
+        beginTest ("An insert is invisible to the audio thread until it is published");
+        {
+            // This is the contract that makes the audio path thread safe: editing the
+            // model must not change what the audio thread sees until it is published.
+            ChannelStrip strip;
+            strip.prepare (44100.0, 512, 2);
+            auto& params = strip.getParameters();
+
+            InsertSlot slot;
+            applyInsertDefaults (slot, InsertType::delay);
+            writeInsertValues (slot, { 120.0, 0.0, 50.0 });
+
+            auto view = params.getInsertView (0);
+            expect (view.type == InsertType::none,
+                    "a strip with nothing published must see no insert at all");
+            expect (! view.isActive(), "and nothing may be considered active");
+
+            params.publishInsert (0, slot);
+            view = params.getInsertView (0);
+            expect (view.type == InsertType::delay, "after publishing, the type is visible");
+            expect (juce::approximatelyEqual (view.p1, slot.p1), "and its parameters with it");
+            expect (view.isActive(), "and the slot is active");
+        }
+
+        beginTest ("Publishing bypass and clearing are separate, visible steps");
+        {
+            ChannelStrip strip;
+            strip.prepare (44100.0, 512, 2);
+            auto& params = strip.getParameters();
+
+            InsertSlot slot;
+            applyInsertDefaults (slot, InsertType::eq);
+            params.publishInsert (0, slot);
+            expect (params.getInsertView (0).isActive(), "an unbypassed insert is active");
+
+            slot.bypassed = true;
+            params.publishInsert (0, slot);
+            expect (! params.getInsertView (0).isActive(), "bypass reaches the audio thread");
+            expect (params.getInsertView (0).type == InsertType::eq,
+                    "bypassing must not lose which effect is in the slot");
+
+            params.clearInserts();
+            expect (params.getInsertView (0).type == InsertType::none,
+                    "clearing must remove the effect, not just bypass it");
+        }
+
+        beginTest ("The published values are lock free and tear free");
+        {
+            // A data race cannot be proven absent by a test. What can be checked is that
+            // the mechanism is the lock-free kind, and that a read always yields one of
+            // the values that was actually published - never a mixture of two.
+            using State = nux::AtomicInsertState;
+            expect (State {}.p1.is_lock_free(), "the published parameters must be lock free");
+            expect (State {}.type.is_lock_free(), "the published type must be lock free");
+
+            State state;
+            InsertSlot slot;
+            slot.type = InsertType::delay;
+
+            // Seed with one of the two values the writer alternates between. Seeding with
+            // anything else makes the first reads look like corruption when they are
+            // simply an older, legitimately published value.
+            slot.p1 = 1.0f;
+            state.publish (slot);
+
+            std::atomic<bool> stop { false };
+            std::atomic<int> badReads { 0 };
+            std::atomic<int> reads { 0 };
+
+            // The writer alternates between two complete parameter sets; the reader must
+            // never see a value from neither set.
+            std::thread writer ([&state, &stop]
+            {
+                float value = 1.0f;
+
+                while (! stop.load (std::memory_order_relaxed))
+                {
+                    InsertSlot s;
+                    s.p1 = value;
+                    s.p2 = value;
+                    s.p3 = value;
+                    state.publish (s);
+                    value = value == 1.0f ? 2.0f : 1.0f;
+                }
+            });
+
+            for (int i = 0; i < 200000; ++i)
+            {
+                const auto view = state.load();
+                reads.fetch_add (1, std::memory_order_relaxed);
+
+                if (! (juce::approximatelyEqual (view.p1, 1.0f)
+                       || juce::approximatelyEqual (view.p1, 2.0f)))
+                {
+                    if (badReads.fetch_add (1, std::memory_order_relaxed) == 0)
+                        logMessage ("first unexpected value: " + juce::String (view.p1, 6)
+                                    + " (type " + juce::String ((int) view.type) + ")");
+                }
+            }
+
+            stop.store (true, std::memory_order_relaxed);
+            writer.join();
+
+            expectEquals (badReads.load(), 0,
+                          "a read produced a value that was never published: "
+                          + juce::String (reads.load()) + " reads");
+        }
+
     }
 };
 

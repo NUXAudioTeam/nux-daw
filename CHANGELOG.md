@@ -1,3 +1,20 @@
+## [Unreleased] - insert parameters are now published, not shared
+
+### Fixed
+
+- **A data race on every insert parameter.** The audio thread used to read the project
+  model's `InsertSlot` objects directly while the UI thread edited them. Two consequences:
+  a torn float could reach the DSP (a click), and the copy path touched `juce::String`
+  members that the audio thread must never see allocate.
+
+  The audio path now reads only `AtomicInsertState`: the message thread publishes the
+  model with release semantics, the audio thread loads one `InsertView` per slot per block
+  with acquire. The model itself is never read on the audio thread.
+
+- Three tests pin the contract: nothing reaches the DSP before it is published, bypass and
+  clearing stay separate and visible, and the published state is lock free and never
+  produces a value that was not published (a 200k-read stress against a concurrent writer).
+
 ## [Unreleased] - device selection and the device round trip
 
 ### Added

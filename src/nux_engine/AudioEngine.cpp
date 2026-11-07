@@ -232,8 +232,7 @@ void AudioEngine::rebuildGraph()
 
         for (int s = 0; s < constants::maxBusInserts; ++s)
         {
-            params.inserts[(size_t) s] = source.inserts[(size_t) s];
-            params.insertTypes[(size_t) s].store ((int) source.inserts[(size_t) s].type, std::memory_order_release);
+            params.publishInsert (s, source.inserts[(size_t) s]);
         }
 
         if (graphPrepared)
@@ -245,9 +244,7 @@ void AudioEngine::rebuildGraph()
 
     for (int s = 0; s < constants::maxTrackInserts; ++s)
     {
-        masterBus.getParameters().inserts[(size_t) s] = projectState->master.inserts[(size_t) s];
-        masterBus.getParameters().insertTypes[(size_t) s].store ((int) projectState->master.inserts[(size_t) s].type,
-                                                                std::memory_order_release);
+            masterBus.getParameters().publishInsert (s, projectState->master.inserts[(size_t) s]);
     }
 
     if (graphPrepared)
@@ -283,8 +280,7 @@ void AudioEngine::syncMixerFromState()
 
         for (int s = 0; s < constants::maxTrackInserts; ++s)
         {
-            params.inserts[(size_t) s] = source.inserts[(size_t) s];
-            params.insertTypes[(size_t) s].store ((int) source.inserts[(size_t) s].type, std::memory_order_release);
+            params.publishInsert (s, source.inserts[(size_t) s]);
         }
 
         trackBusIndex[(size_t) i] = juce::jlimit (0, constants::numMixerBuses - 1, source.busIndex);
@@ -301,8 +297,7 @@ void AudioEngine::syncMixerFromState()
 
         for (int s = 0; s < constants::maxBusInserts; ++s)
         {
-            params.inserts[(size_t) s] = source.inserts[(size_t) s];
-            params.insertTypes[(size_t) s].store ((int) source.inserts[(size_t) s].type, std::memory_order_release);
+            params.publishInsert (s, source.inserts[(size_t) s]);
         }
     }
 
@@ -311,9 +306,7 @@ void AudioEngine::syncMixerFromState()
 
     for (int s = 0; s < constants::maxTrackInserts; ++s)
     {
-        masterBus.getParameters().inserts[(size_t) s] = projectState->master.inserts[(size_t) s];
-        masterBus.getParameters().insertTypes[(size_t) s].store ((int) projectState->master.inserts[(size_t) s].type,
-                                                                std::memory_order_release);
+            masterBus.getParameters().publishInsert (s, projectState->master.inserts[(size_t) s]);
     }
 }
 
@@ -1336,9 +1329,8 @@ juce::String AudioEngine::loadInsertPlugin (StripKind kind, int stripIndex, int 
     strip->setPluginSlot (slotIndex, std::move (slot));
 
     auto& params = strip->getParameters();
-    params.inserts[(size_t) slotIndex].type = InsertType::plugin;
-    params.inserts[(size_t) slotIndex].bypassed = false;
-    params.insertTypes[(size_t) slotIndex].store ((int) InsertType::plugin, std::memory_order_release);
+    params.setInsert (slotIndex, InsertType::plugin);
+    params.setInsertParams (slotIndex, 0.0f, 0.0f, 0.0f);
 
     restartDeviceAfterGraphEdit();
     return {};
@@ -1376,9 +1368,8 @@ juce::String AudioEngine::loadTrackInstrument (int trackIndex)
     tracks[(size_t) trackIndex].strip.setPluginSlot (0, std::move (slot));
 
     auto& params = tracks[(size_t) trackIndex].strip.getParameters();
-    params.inserts[0].type = InsertType::plugin;
-    params.inserts[0].bypassed = false;
-    params.insertTypes[0].store ((int) InsertType::plugin, std::memory_order_release);
+    params.setInsert (0, InsertType::plugin);
+    params.setInsertParams (0, 0.0f, 0.0f, 0.0f);
 
     restartDeviceAfterGraphEdit();
     return {};
