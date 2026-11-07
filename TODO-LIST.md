@@ -13,8 +13,8 @@
 | # | කාර්යය | සටහන | තත්ත්වය |
 |---|---|---|---|
 | 0.1 | **Windows CI segfault එක හොයාගන්න** | ✅ **විසඳා ඇත.** හේතුව logic bug එකක් නෙවෙයි — `sizeof(AudioEngine)` = **447,584 bytes (Windows)**. Tests stack එකේ `AudioEngine engine;` හැදුවා → Windows stack 1 MB → overflow. Linux 8 MB නිසා පෙනුණේ නෑ. Heap එකට මාරු කළා + size guard test එකක් | ✅ |
-| 0.2 | **`feature/audio-testing` සඳහා PR එකක් අරින්න** | Branch එකේ commits 5ක්, PR එකක් තාම නෑ. PR #3 (`feature/vst3-hosting`) වෙනම | ⬜ |
-| 0.3 | Merge order එක විසඳන්න | #1 (`v0.3-foundation`) → #2 (`audio-clips`) → #3 (`vst3-hosting`) → audio-testing. Branches stack වෙලා තියෙනවා | ⬜ |
+| 0.2 | ~~`feature/audio-testing` PR~~ | ✅ **PR #4** ඇරියා. දැන් `feature/engine-hardening` වෙනම branch + PR #5 | ✅ |
+| 0.3 | Merge order එක විසඳන්න | #1 → #2 → #3 → #4 → #5. **ඔයාගේ පැත්තෙන්** — මට merge කරන්න බෑ | ⏳ |
 | 0.4 | ~~`beginTest` 115 vs report 114~~ | ✅ **විසඳුණා — bug එකක් නෙවෙයි.** `PluginHostTests` එකේ group එකක් තියෙන්නේ plugins **නැති විට** විතරයි. Plugins build කළොත් 8 real groups run වෙනවා, එකක් අඩුවෙන් පේනවා. Design එකෙන් එහෙමයි | ✅ |
 
 ---
@@ -49,7 +49,7 @@
 
 | # | කාර්යය | දැන් තත්ත්වය | කරන්න ඕන |
 |---|---|---|---|
-| 2.1 | **Record button එක UI එකට wire කිරීම** | `startRecordingToFile()` engine එකේ තියෙනවා, UI button එකකට සම්බන්ධ නෑ | transport record button + input channel + latency compensation |
+| 2.1 | ~~Record button UI එකට wire කිරීම~~ | ✅ **දැනටමත් තියෙනවා — මගේ කලින් සටහන වැරදියි.** `TransportBar::recordButton` → `onRecordToggled` → `MainComponent::toggleRecording()` → `engine.startInputRecording()` → `stopInputRecording()` → `placeRecordedTake()`. `--record-self-test` එකෙන් ඔප්පු කළා (take → clip, track → audio, clip load වුණා). **ඉතුරු:** latency compensation + monitoring | ✅ (latency ❌) |
 | 2.2 | **Piano roll velocity knob** | `ignoreUnused` කරලා | note draw වෙද්දී value එක use කරන්න |
 | 2.3 | **Octave +/- buttons** | `octaveOffset` විතරයි වෙනස් වෙන්නේ, canvas scroll වෙන්නේ නෑ | `setLowestNote()` hook |
 | 2.4 | **Pattern clips (multi-clip)** | Model එකේ `Clip` array, UI එකේ එකම clip එකයි edit වෙන්නේ | timeline blocks, add/delete/move |
