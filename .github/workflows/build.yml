@@ -93,7 +93,11 @@ jobs:
               $p.Kill()
               Write-Host "::warning::--device-report did not exit within 120 s and was killed."
             }
-            if (Test-Path $out) { Get-Content $out | Write-Host }
+            # The app reports through std::cerr, not stdout, so both streams matter -
+            # printing only the stdout file is how this step ran green while showing
+            # nothing at all.
+            if (Test-Path $out)     { Get-Content $out     | Write-Host }
+            if (Test-Path "$out.err") { Get-Content "$out.err" | Write-Host }
           }
 
       - name: Publish the test output
