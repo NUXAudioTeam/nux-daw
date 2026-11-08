@@ -6,32 +6,64 @@ namespace nux
 //==============================================================================
 // StripParameters
 //==============================================================================
+void AtomicInsertState::publish (const InsertSlot& slot) noexcept
+{
+    p1.store (slot.p1, std::memory_order_relaxed);
+    p2.store (slot.p2, std::memory_order_relaxed);
+    p3.store (slot.p3, std::memory_order_relaxed);
+    bypassed.store (slot.bypassed, std::memory_order_relaxed);
+
+    // The type goes last and carries the release: by the time the audio thread sees a new
+    // effect type, that effect's parameters are already visible to it.
+    type.store ((int) slot.type, std::memory_order_release);
+}
+
+InsertView AtomicInsertState::load() const noexcept
+{
+    InsertView view;
+    view.type = (InsertType) type.load (std::memory_order_acquire);
+    view.bypassed = bypassed.load (std::memory_order_relaxed);
+    view.p1 = p1.load (std::memory_order_relaxed);
+    view.p2 = p2.load (std::memory_order_relaxed);
+    view.p3 = p3.load (std::memory_order_relaxed);
+    return view;
+}
+
+void AtomicInsertState::clear() noexcept
+{
+    p1.store (0.0f, std::memory_order_relaxed);
+    p2.store (0.0f, std::memory_order_relaxed);
+    p3.store (0.0f, std::memory_order_relaxed);
+    bypassed.store (false, std::memory_order_relaxed);
+    type.store ((int) InsertType::none, std::memory_order_release);
+}
+
 void StripParameters::setInsert (int index, InsertType newType)
 {
-    if (! juce::isPositiveAndBelow (index, constants::maxTrackInserts))
-        return;
-
-    inserts[(size_t) index].type = newType;
-    insertTypes[(size_t) index].store ((int) newType, std::memory_order_release);
+    insertState[(size_t) index].type.store ((int) newType, std::memory_order_release);
 }
 
 void StripParameters::setInsertParams (int index, float p1, float p2, float p3)
 {
-    if (! juce::isPositiveAndBelow (index, constants::maxTrackInserts))
-        return;
-
-    auto& slot = inserts[(size_t) index];
-    slot.p1 = p1;
-    slot.p2 = p2;
-    slot.p3 = p3;
+    auto& state = insertState[(size_t) index];
+    state.p1.store (p1, std::memory_order_relaxed);
+    state.p2.store (p2, std::memory_order_relaxed);
+    state.p3.store (p3, std::memory_order_relaxed);
 }
 
 InsertType StripParameters::getInsertType (int index) const
 {
-    if (! juce::isPositiveAndBelow (index, constants::maxTrackInserts))
-        return InsertType::none;
+    return (InsertType) insertState[(size_t) index].type.load (std::memory_order_acquire);
+}
 
-    return (InsertType) insertTypes[(size_t) index].load (std::memory_order_acquire);
+InsertView StripParameters::getInsertView (int index) const
+{
+    return insertState[(size_t) index].load();
+}
+
+void StripParameters::publishInsert (int index, const InsertSlot& slot)
+{
+    insertState[(size_t) index].publish (slot);
 }
 
 void StripParameters::loadFrom (const TrackState& track)
@@ -41,10 +73,7 @@ void StripParameters::loadFrom (const TrackState& track)
     muted.store (track.muted);
 
     for (int i = 0; i < constants::maxTrackInserts; ++i)
-    {
-        inserts[(size_t) i] = track.inserts[(size_t) i];
-        insertTypes[(size_t) i].store ((int) track.inserts[(size_t) i].type, std::memory_order_release);
-    }
+        insertState[(size_t) i].publish (track.inserts[(size_t) i]);
 }
 
 void StripParameters::copyTo (TrackState& track) const
@@ -54,16 +83,20 @@ void StripParameters::copyTo (TrackState& track) const
     track.muted    = muted.load();
 
     for (int i = 0; i < constants::maxTrackInserts; ++i)
-        track.inserts[(size_t) i] = inserts[(size_t) i];
+    {
+        const auto view = insertState[(size_t) i].load();
+        track.inserts[(size_t) i].type = view.type;
+        track.inserts[(size_t) i].bypassed = view.bypassed;
+        track.inserts[(size_t) i].p1 = view.p1;
+        track.inserts[(size_t) i].p2 = view.p2;
+        track.inserts[(size_t) i].p3 = view.p3;
+    }
 }
 
 void StripParameters::clearInserts()
 {
-    for (int i = 0; i < constants::maxTrackInserts; ++i)
-    {
-        inserts[(size_t) i] = {};
-        insertTypes[(size_t) i].store ((int) InsertType::none, std::memory_order_release);
-    }
+    for (auto& state : insertState)
+        state.clear();
 }
 
 //==============================================================================
@@ -117,7 +150,7 @@ void InsertProcessor::reset()
     lastCompThreshold = 999.0f;
 }
 
-void InsertProcessor::configureFor (InsertType newType, const InsertSlot& slot)
+void InsertProcessor::configureFor (InsertType newType, const InsertView& slot)
 {
     if (newType == currentType)
         return;
@@ -141,7 +174,7 @@ void InsertProcessor::configureFor (InsertType newType, const InsertSlot& slot)
     juce::ignoreUnused (slot);
 }
 
-void InsertProcessor::process (juce::AudioBuffer<float>& buffer, const InsertSlot& slot, int samplesToProcess)
+void InsertProcessor::process (juce::AudioBuffer<float>& buffer, const InsertView& slot, int samplesToProcess)
 {
     configureFor (slot.type, slot);
 
@@ -196,7 +229,7 @@ void InsertProcessor::process (juce::AudioBuffer<float>& buffer, const InsertSlo
     }
 }
 
-void InsertProcessor::processEq (juce::AudioBuffer<float>& buffer, const InsertSlot& slot)
+void InsertProcessor::processEq (juce::AudioBuffer<float>& buffer, const InsertView& slot)
 {
     const auto numSamples = blockSamples;
 
@@ -235,7 +268,7 @@ void InsertProcessor::processEq (juce::AudioBuffer<float>& buffer, const InsertS
     highShelf.process (context);
 }
 
-void InsertProcessor::processCompressor (juce::AudioBuffer<float>& buffer, const InsertSlot& slot)
+void InsertProcessor::processCompressor (juce::AudioBuffer<float>& buffer, const InsertView& slot)
 {
     const auto numSamples = blockSamples;
 
@@ -267,7 +300,7 @@ void InsertProcessor::processCompressor (juce::AudioBuffer<float>& buffer, const
     buffer.applyGain (makeup);
 }
 
-void InsertProcessor::processDelay (juce::AudioBuffer<float>& buffer, const InsertSlot& slot)
+void InsertProcessor::processDelay (juce::AudioBuffer<float>& buffer, const InsertView& slot)
 {
     const auto numSamples = blockSamples;
 
@@ -300,7 +333,7 @@ void InsertProcessor::processDelay (juce::AudioBuffer<float>& buffer, const Inse
     }
 }
 
-void InsertProcessor::processReverb (juce::AudioBuffer<float>& buffer, const InsertSlot& slot)
+void InsertProcessor::processReverb (juce::AudioBuffer<float>& buffer, const InsertView& slot)
 {
     const auto numSamples = blockSamples;
 
@@ -361,19 +394,21 @@ void ChannelStrip::processInserts (juce::AudioBuffer<float>& buffer, juce::MidiB
 
     for (int i = 0; i < constants::maxTrackInserts; ++i)
     {
-        const auto type = params.insertTypes[(size_t) i].load (std::memory_order_acquire);
+        // One snapshot per slot per block. This is the only insert state the audio thread
+        // touches; the model on the UI side is never read here.
+        const auto view = params.getInsertView (i);
 
-        if (type == (int) InsertType::none)
+        if (view.type == InsertType::none)
             continue;
 
-        if (type == (int) InsertType::plugin)
+        if (view.type == InsertType::plugin)
         {
             // A hosted plugin replaces the built-in processor for this slot. A slot
             // whose plugin failed to load stays as a pass-through rather than
             // silencing the channel.
             if (auto* plugin = pluginSlots[(size_t) i].get())
             {
-                if (params.inserts[(size_t) i].bypassed)
+                if (view.bypassed)
                     continue;
 
                 plugin->process (buffer, numSamples, midi);
@@ -382,7 +417,7 @@ void ChannelStrip::processInserts (juce::AudioBuffer<float>& buffer, juce::MidiB
             continue;
         }
 
-        inserts[(size_t) i].process (buffer, params.inserts[(size_t) i], numSamples);
+        inserts[(size_t) i].process (buffer, view, numSamples);
     }
 }
 
@@ -411,7 +446,7 @@ void ChannelStrip::setPluginSlot (int index, std::unique_ptr<PluginSlot> slot)
 
     for (int i = 0; i < constants::maxTrackInserts; ++i)
         if (auto* p = pluginSlots[(size_t) i].get())
-            if (p->replacesInput() && ! params.inserts[(size_t) i].bypassed)
+            if (p->replacesInput() && ! params.getInsertView (i).bypassed)
                 hasInstrument = true;
 
     instrumentSlotActive.store (hasInstrument, std::memory_order_release);
@@ -428,9 +463,9 @@ void ChannelStrip::sanitisePluginSlotTypes()
 {
     for (int i = 0; i < constants::maxTrackInserts; ++i)
     {
-        const auto type = params.insertTypes[(size_t) i].load (std::memory_order_acquire);
+        const auto view = params.getInsertView (i);
 
-        if (type == (int) InsertType::plugin && pluginSlots[(size_t) i] == nullptr)
+        if (view.type == InsertType::plugin && pluginSlots[(size_t) i] == nullptr)
             params.setInsert (i, InsertType::none);   // plugin missing: drop the slot
     }
 }
