@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "../nux_core/TakePlacement.h"
 #include "../nux_engine/AudioDeviceProbe.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -810,49 +811,31 @@ void MainComponent::placeRecordedTake (const AudioEngine::RecordedTake& take)
 {
     auto& state = document.getState();
 
-    const auto trackIndex = juce::isPositiveAndBelow (take.trackIndex, (int) state.tracks.size())
-                              ? take.trackIndex
-                              : 0;
-
-    if (! juce::isPositiveAndBelow (trackIndex, (int) state.tracks.size()))
-        return;
-
-    document.beginEdit ("record audio", "Record an audio clip");
-    auto& track = state.tracks[(size_t) trackIndex];
-
-    // A recorded take turns the track into an audio track, exactly like an import,
-    // and the file lives in the project's media folder so the project stays portable.
-    track.type = TrackType::audio;
-
-    // A take inside the project is stored relative to it, so the project stays
-    // portable. A take from elsewhere keeps its absolute path, which the engine
-    // resolves as-is; storing only a bare file name would make it unloadable.
+    // A take inside the project is stored relative to it, so the project stays portable.
+    // A take from elsewhere keeps its absolute path, which the engine resolves as-is;
+    // storing only a bare file name would make it unloadable. The core module does not know
+    // where the project lives, so this decision stays here.
     const auto folder = document.getProjectFolder();
     const auto relative = take.file.getRelativePathFrom (folder);
 
-    AudioClip clip;
-    clip.name = take.file.getFileNameWithoutExtension();
-    clip.sourceFile = fileIsInsideFolder (take.file, folder) && relative.isNotEmpty()
-                        ? relative
-                        : take.file.getFullPathName();
-    clip.startStep = (int) std::round (take.startStep);
-    clip.lengthSteps = juce::jmax (1, (int) std::ceil (take.lengthSeconds * state.tempo / 60.0
-                                                       * (double) constants::stepsPerBeat));
-    clip.sourceStartSample = 0;
+    TakePlacementRequest request;
+    request.clipName = take.file.getFileNameWithoutExtension();
+    request.storedPath = fileIsInsideFolder (take.file, folder) && relative.isNotEmpty()
+                            ? relative
+                            : take.file.getFullPathName();
+    request.startStep = take.startStep;
+    request.lengthSeconds = take.lengthSeconds;
 
-    track.audioClips.push_back (clip);
+    // An empty key means "discrete step": two recordings must be two undo steps. The
+    // shared key that was here before made them coalesce, so one undo deleted both takes.
+    document.beginEdit ({}, "Record an audio clip");
 
-    // Grow the pattern so the new clip is inside it.
-    const auto clipEnd = clip.startStep + clip.lengthSteps;
+    const auto placed = placeTake (state, take.trackIndex, request);
 
-    if (clipEnd > state.patternLengthSteps)
+    if (! placed.placed)
     {
-        auto newLength = state.patternLengthSteps;
-
-        while (newLength < clipEnd && newLength < constants::maxNumSteps)
-            newLength += constants::stepsPerBeat * 4;
-
-        state.patternLengthSteps = juce::jmin (newLength, constants::maxNumSteps);
+        showStatus (placed.error);
+        return;
     }
 
     engine.rebuildGraph();
@@ -863,7 +846,8 @@ void MainComponent::placeRecordedTake (const AudioEngine::RecordedTake& take)
     document.markDirty();
     updateWindowTitle();
 
-    showStatus ("Recorded " + juce::String (take.lengthSeconds, 1) + " s onto " + track.name);
+    showStatus ("Recorded " + juce::String (take.lengthSeconds, 1) + " s onto "
+                  + state.tracks[(size_t) placed.trackIndex].name);
 }
 
 //==============================================================================
