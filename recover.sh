@@ -52,11 +52,11 @@ cd "$REPO" || exit 1
 if ! git remote get-url origin > /dev/null 2>&1; then
     TOKEN_FILE="/tmp/tok.txt"
     if [ -f "$TOKEN_FILE" ]; then
-        git remote add origin "https://$(cat "$TOKEN_FILE")@github.com/hirushanethsara323-jpg/nux-daw.git"
+        git remote add origin "https://$(cat "$TOKEN_FILE")@github.com/NUXAudioTeam/nux-daw.git"
         echo "remote restored from $TOKEN_FILE"
     else
         echo "WARNING: no token in $TOKEN_FILE - set the remote by hand before pushing:"
-        echo "  git remote add origin https://<token>@github.com/hirushanethsara323-jpg/nux-daw.git"
+        echo "  git remote add origin https://<token>@github.com/NUXAudioTeam/nux-daw.git"
     fi
 else
     echo "remote already configured"
