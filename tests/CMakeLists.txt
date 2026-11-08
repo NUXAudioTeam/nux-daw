@@ -10,6 +10,7 @@ target_sources(NUXTests PRIVATE
     PluginHostTests.cpp
     InsertParameterTests.cpp
     UndoTests.cpp
+    UndoReliabilityTests.cpp
     RecordingTests.cpp
     AudioDeviceTests.cpp
     OfflineAudioTests.cpp
@@ -85,6 +86,7 @@ set(NUX_TEST_GROUPS
     "plugin hosting"
     "insert parameters"
     "undo history"
+    "undo reliability"
     "input recording"
     "audio device"
     "offline audio"
