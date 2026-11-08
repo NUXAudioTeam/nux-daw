@@ -584,6 +584,15 @@ void AudioEngine::audioDeviceStopped()
     deviceLost.store (true, std::memory_order_release);
 
     testTone.reset();
+
+    // An input device that goes away mid-take leaves the recorder waiting for audio that
+    // will never arrive. Finalise what was captured and keep it: the alternative is a take
+    // that keeps claiming to be recording and is thrown away at shutdown.
+    if (inputRecorder.isRecording())
+    {
+        interruptedTake = stopInputRecording();
+        interruptedTakePending.store (true, std::memory_order_release);
+    }
 }
 
 void AudioEngine::audioDeviceError (const juce::String& errorMessage)
@@ -1630,9 +1639,13 @@ juce::String AudioEngine::startInputRecording (const juce::File& mediaFolder)
 
     juce::String error;
 
-    if (! inputRecorder.start (file, transport.getPositionSteps(), error))
+    // The track goes into the take now. Reading the armed track again when the take stops
+    // meant that arming another track (or disarming) mid-recording moved the finished take
+    // to a different track, or to track one through the invalid-index fallback.
+    if (! inputRecorder.start (file, transport.getPositionSteps(), track, error))
         return error;
 
+    interruptedTakePending.store (false, std::memory_order_release);
     transport.setRecording (true);
     transport.setPlaying (true);
 
@@ -1646,21 +1659,46 @@ AudioEngine::RecordedTake AudioEngine::stopInputRecording()
     if (! inputRecorder.isRecording())
         return take;
 
+    // Taken before stop(), because stop() is what closes the file and resets the counters.
     take.file = inputRecorder.getRecordingFile();
     take.startStep = inputRecorder.getStartPositionSteps();
-    take.lengthSeconds = inputRecorder.getRecordedSeconds();
-    take.trackIndex = getArmedTrack();
+    take.trackIndex = inputRecorder.getStartTrackIndex();
+    take.droppedSamples = inputRecorder.getDroppedSamples();
 
-    inputRecorder.stop();
+    const auto finalised = inputRecorder.stop();
+    take.lengthSeconds = inputRecorder.getRecordedSeconds();
+
     transport.setRecording (false);
+
+    if (! finalised)
+    {
+        // The bytes may still be on disk and repairable, so the file is left alone and the
+        // caller is told the take was not saved. Reporting it as saved is how a recording
+        // disappears with nobody noticing.
+        take.saved = false;
+        take.error = inputRecorder.getLastError().isNotEmpty()
+                       ? inputRecorder.getLastError()
+                       : juce::String ("The recording could not be finalised.");
+        return take;
+    }
 
     // A take shorter than a few milliseconds is a mistake, not a recording.
     if (take.lengthSeconds < 0.05)
     {
         take.file.deleteFile();
-        take = RecordedTake {};
+        return RecordedTake {};
     }
 
+    take.saved = true;
     return take;
+}
+
+AudioEngine::RecordedTake AudioEngine::takeInterruptedRecording()
+{
+    if (! interruptedTakePending.load (std::memory_order_acquire))
+        return {};
+
+    interruptedTakePending.store (false, std::memory_order_release);
+    return interruptedTake;
 }
 }

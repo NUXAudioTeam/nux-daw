@@ -434,7 +434,7 @@ public:
             recorder.prepare (44100.0, 512, 2);
 
             juce::String error;
-            expect (recorder.start (file, 0.0, error), "Could not start the take: " + error);
+            expect (recorder.start (file, 0.0, 0, error), "Could not start the take: " + error);
 
             // Push a known 440 Hz tone through the recorder, as the audio thread would.
             juce::AudioBuffer<float> block (2, 512);

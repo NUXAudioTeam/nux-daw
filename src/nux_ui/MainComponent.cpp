@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "../nux_core/TakePlacement.h"
+#include "../nux_core/RecordingRecovery.h"
 #include "../nux_engine/AudioDeviceProbe.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -255,6 +256,12 @@ MainComponent::MainComponent()
 
     pluginManager.loadCachedList();
 
+    // A take that was being written when the machine died is still on disk with a header
+    // that says "no audio". Repair it before anything can overwrite the folder.
+    if (const auto recovered = recoverInterruptedRecordings(); recovered > 0)
+        showStatus ("Recovered " + juce::String (recovered)
+                      + " interrupted recording(s) from the media folder");
+
     startTimerHz (20);
 
     // The window is not on screen yet, so take focus once it is.
@@ -279,6 +286,25 @@ MainComponent::~MainComponent()
 //==============================================================================
 void MainComponent::timerCallback()
 {
+    // The input device went away mid-take. The audio captured up to that point was
+    // finalised and kept; place it rather than throwing it away.
+    if (engine.hasInterruptedRecording())
+    {
+        const auto take = engine.takeInterruptedRecording();
+
+        if (take.saved && take.file.existsAsFile())
+        {
+            placeRecordedTake (take);
+            showStatus ("The input device was lost - the take up to that point was kept");
+            timelineView.rebuild();
+            refreshAllViews();
+        }
+        else if (take.error.isNotEmpty())
+        {
+            showStatus ("The input device was lost and the take could not be saved: " + take.error);
+        }
+    }
+
     // While recording, move captured audio into the WAV file and show progress.
     if (engine.isInputRecording())
     {
@@ -764,6 +790,14 @@ void MainComponent::toggleRecording()
     {
         const auto take = engine.stopInputRecording();
 
+        if (! take.saved && take.file != juce::File())
+        {
+            // The bytes may still be on disk. Saying "saved" here is how a take disappears.
+            showStatus ("The recording could not be saved: " + take.error);
+            refreshAllViews();
+            return;
+        }
+
         if (take.file == juce::File())
         {
             showStatus ("Recording was too short to keep");
@@ -771,6 +805,10 @@ void MainComponent::toggleRecording()
             refreshAllViews();
             return;
         }
+
+        if (take.droppedSamples > 0)
+            showStatus ("The take has gaps: " + juce::String (take.droppedSamples)
+                          + " samples were dropped while the disk fell behind");
 
         placeRecordedTake (take);
         timelineView.rebuild();
@@ -805,6 +843,26 @@ bool MainComponent::fileIsInsideFolder (const juce::File& file, const juce::File
     const auto root = folder.getFullPathName();
 
     return root.isNotEmpty() && parent.startsWith (root);
+}
+
+int MainComponent::recoverInterruptedRecordings()
+{
+    const auto folder = document.getMediaFolder();
+
+    if (! folder.isDirectory())
+        return 0;
+
+    int recovered = 0;
+
+    for (const auto& file : findUnfinalisedTakes (folder))
+    {
+        const auto info = repairWav (file);
+
+        if (info.ok && info.repaired)
+            ++recovered;
+    }
+
+    return recovered;
 }
 
 void MainComponent::placeRecordedTake (const AudioEngine::RecordedTake& take)

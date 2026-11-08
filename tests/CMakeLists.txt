@@ -18,11 +18,14 @@ target_sources(NUXTests PRIVATE
     RoundTripTests.cpp
     DeviceSelectionTests.cpp
     TakePlacementTests.cpp
+    RecordingRecoveryTests.cpp
+    RecordingReliabilityTests.cpp
     ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/InsertParameters.cpp
     ../src/nux_core/UndoHistory.cpp
     ../src/nux_core/TakePlacement.cpp
+    ../src/nux_core/RecordingRecovery.cpp
     ../src/nux_core/TrackModel.cpp
     ../src/nux_engine/AudioClipPlayer.cpp
     ../src/nux_engine/AudioClipStore.cpp
@@ -89,7 +92,9 @@ set(NUX_TEST_GROUPS
     "measurements"
     "audio round trip"
     "device selection"
-    "take placement")
+    "take placement"
+    "recording reliability"
+    "recording recovery")
 
 foreach (group IN LISTS NUX_TEST_GROUPS)
     string(REPLACE " " "_" slug "${group}")

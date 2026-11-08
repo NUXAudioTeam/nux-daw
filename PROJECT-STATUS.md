@@ -27,7 +27,7 @@ NUX DAW එකට **play, sequence, mix, audio clips, VST3 effects + instruments
 | Target | Windows (WASAPI, WASAPI exclusive, DirectSound, ASIO compiled in) |
 | UI | Dark modern studio UI, teal accents, own `Theme.cpp` |
 | Code size | `src/` — files 62, lines **15,384** |
-| Tests | `tests/` — files **17**, suites 15, groups **147** (17 new: take placement) |
+| Tests | `tests/` — files **19**, suites 18, groups **165** (18 new: recording reliability + recovery) |
 | Licence | JUCE AGPLv3-or-commercial (තීරණයක් ගන්න ඕන) |
 
 ### වැඩ කරන දේවල්
