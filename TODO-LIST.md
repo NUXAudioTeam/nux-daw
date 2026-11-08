@@ -1,6 +1,6 @@
 # NUX DAW — මොකද ඉතුරු, මොකද කරන්න ඕන
 
-> අවසන් යාවත්කාලීනය: v0.3.0 foundation (branch `feature/v0.3-foundation`)
+> අවසන් යාවත්කාලීනය: v0.3.0 foundation — [PR #1](https://github.com/hirushanethsara323-jpg/nux-daw/pull/1) (CI green: Windows MSVC + Linux GCC)
 
 මේක **ඇත්තටම කේතයේ තත්වය** අනුව හදපු ලැයිස්තුවක්. "implemented" කියලා ලියලා තියෙන දේවල් compile වෙලා test වෙලා තියෙනවා; "stub" කියලා තියෙන දේවල් UI එකේ තියෙනවා නමුත් ඇත්තටම වැඩ කරන්නේ නැහැ.
 
@@ -11,12 +11,13 @@
 | # | කාර්යය | ඇයි වැදගත් | තත්වය |
 |---|---|---|---|
 | 1.1 | **GitHub token එක revoke කරන්න** | Token එක chat එකේ public වුණා. Repo 30කටම access තියෙනවා | ⏳ ඔයාගේ පැත්තෙන් |
-| 1.2 | `.gitignore` + `build/` ඉවත් කරලා commit | දැන් repo එකේ commit එකක්වත් නැහැ, `build/` (136 MB binary) stage වෙලා තියෙනවා | ⬜ |
-| 1.3 | `feature/v0.3-foundation` branch + **Pull Request** | ඔයාගේ prompt එකේ තියෙන rule එක (main එකට කෙලින්ම යවන්නේ නැහැ) | ⬜ |
-| 1.4 | **Windows/MSVC build එක verify කරන්න** | මම build කළේ Linux/GCC එකෙන් විතරයි. VS 2022 එකේ compile වෙනවද කියලා තාම ඔප්පු කරලා නැහැ | ⬜ |
-| 1.5 | GitHub Actions CI (`windows-latest`) | ඉහත 1.4 ස්වයංක්‍රීයව හැම PR එකකදීම verify වෙන්න | ⬜ |
-| 1.6 | JUCE assertion 2ක් හදන්න | `grabKeyboardFocus()` window එක show වෙන්න කලින්; timer එකකින් repaint | ⬜ |
-| 1.7 | `README.md`, `BUILDING.md`, `LICENSE`, `CHANGELOG.md` | නැතුව project එකක් "proper" වෙන්නේ නැහැ | ⬜ |
+| 1.2 | `.gitignore` + `build/` ඉවත් කරලා commit | `build/` ignore කරලා, history එක පිරිසිදු කරලා push කළා | ✅ |
+| 1.3 | `feature/v0.3-foundation` branch + **Pull Request** | [PR #1](https://github.com/hirushanethsara323-jpg/nux-daw/pull/1) open | ✅ |
+| 1.4 | **Windows/MSVC build එක verify කරන්න** | CI (MSVC 2022, Release) build + tests pass. `NUX DAW.exe` artifact upload වුණා | ✅ |
+| 1.5 | GitHub Actions CI (Windows + Linux) | දෙකම green. Linux ~13 min, Windows ~17 min | ✅ |
+| 1.6 | JUCE assertion 2ක් හදන්න | Xvfb එකේ clean start; `grabKeyboardFocus` + grid/track header overlap හදලා | ✅ |
+| 1.7 | `README.md`, `BUILDING.md`, `LICENSE`, `CHANGELOG.md` | හතරම ලියලා තියෙනවා | ✅ |
+| 1.8 | **Real Windows machine එකේ manual test** | CI එකට කරන්න බැරි දේ: WASAPI/ASIO device enumeration, latency, real VST3 folder එකකින් plugin load | ⬜ ඔයාගේ පැත්තෙන් |
 
 ---
 
