@@ -128,7 +128,10 @@ Per job, run `42474152655`:
 | Windows (MSVC, Debug + leak detector) | success | 8:56 |
 | Windows (MSVC, Release) | success | 14:42 |
 
-From the Linux Release job log of that run:
+The report commit on top (`fc6e955`) was verified the same way: run `42475447302` (push) and
+`42475452528` (pull request), **4/4 jobs success each**.
+
+From the Linux Release job log of run `42474152655`:
 
 ```
  8/20 Test  #8: NUX_undo_history .................   Passed    0.02 sec
