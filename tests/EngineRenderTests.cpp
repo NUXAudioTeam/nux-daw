@@ -299,6 +299,35 @@ public:
             expect (engine.getTrackPeak (1, 0) < 0.001f,
                     "A non-soloed track must not be heard while another track is soloed");
         }
+        beginTest ("Arming a track is published to the MIDI thread, not just stored");
+        {
+            // The MIDI input callback runs on its own thread. It used to read
+            // projectState->tracks[i].recordArmed straight from the model, which races
+            // against the UI arming and disarming. It reads a published atomic now, and
+            // this pins that the publish actually happens.
+            auto project = ProjectState::createDefault();
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
+
+            engine.setProjectState (&project);
+            expect (! engine.isTrackRecordArmedPublished (0),
+                    "a freshly created project has nothing armed");
+
+            project.tracks[0].recordArmed = true;
+            engine.setProjectState (&project);
+            expect (engine.isTrackRecordArmedPublished (0),
+                    "arming a track must reach the published state the MIDI thread reads");
+
+            project.tracks[0].recordArmed = false;
+            engine.setProjectState (&project);
+            expect (! engine.isTrackRecordArmedPublished (0),
+                    "disarming must reach it too, or a take never stops being recorded");
+
+            for (int i = 0; i < 8; ++i)
+                expect (! engine.isTrackRecordArmedPublished (i),
+                        "every other track stays unarmed");
+        }
+
     }
 };
 
