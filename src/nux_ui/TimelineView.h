@@ -10,7 +10,8 @@ namespace nux
 {
 /** The scrolling grid: 16th-note steps across, tracks down. Clicking a cell
     toggles that step; the playhead follows the transport. */
-class SequencerGrid final : public juce::Component
+class SequencerGrid final : public juce::Component,
+                            public juce::FileDragAndDropTarget
 {
 public:
     SequencerGrid (ProjectDocument& document, AudioEngine& engine);
@@ -19,6 +20,14 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+
+    /** Drag and drop audio files straight onto a track lane. */
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
+    void fileDragEnter (const juce::StringArray& files, int x, int y) override;
+    void fileDragExit (const juce::StringArray& files) override;
 
     void setSelectedTrack (int index);
     int getSelectedTrack() const noexcept { return selectedTrack; }
@@ -29,6 +38,9 @@ public:
     std::function<void()> onPatternEdited;
     std::function<void (int, int)> onPreviewNote;   // track, midi note
     std::function<void (int)> onStepCountRequested; // track index
+    std::function<void (const juce::File&, int)> onAudioFileDropped;   // file, track
+    std::function<void (int, int)> onAudioClipClicked;                 // track, clip
+    std::function<void (int, int)> onAudioClipMenu;                    // track, clip
 
 private:
     juce::Rectangle<float> getCellBounds (int track, int step) const;
@@ -45,6 +57,17 @@ private:
 
     juce::int64 lastClickStep = -1;
     int lastClickTrack = -1;
+
+    /** Audio clip geometry helpers. */
+    struct ClipHit { int track = -1; int clip = -1; };
+    ClipHit hitTestAudioClip (juce::Point<int> position) const;
+    juce::Rectangle<float> getAudioClipBounds (int track, int clipIndex) const;
+
+    int hoveredAudioTrack = -1;
+    int hoveredAudioClip = -1;
+    int pendingDropTrack = -1;
+
+    friend class TimelineView;
 };
 
 //==============================================================================
@@ -61,11 +84,13 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
 
     void rebuild();
+    void refreshAudioClips();
     void setSelectedTrack (int index);
     int getSelectedTrack() const noexcept { return selectedTrack; }
 
     std::function<void()> onProjectEdited;
     std::function<void()> onPreviewNote;
+    std::function<void (const juce::File&, int)> onAudioFileDropped;
 
 private:
     void timerCallback() override;

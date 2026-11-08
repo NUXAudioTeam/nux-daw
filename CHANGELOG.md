@@ -7,10 +7,26 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Audio clip playback.** Audio clips are decoded into cached stereo sample
+  buffers and streamed in sync with the transport, including looped retriggering.
+- **Audio import**: drag and drop a WAV/AIFF/FLAC/Ogg/MP3 file onto a track lane,
+  or use *Import audio file...* from the track menu. Files are copied into the
+  project's `media/` folder so projects stay portable.
+- Clip lane drawing with a waveform preview, plus a clip context menu
+  (duplicate, move to bar 1, remove).
+- Headless smoke-test mode: `NUX DAW --demo-clip <file> --screenshot <png>`.
+- Tests for the clip store, clip player (position, looping, stereo, failures) and
+  an engine test that renders an imported clip into the mixdown.
 - Unit test suite (project model, `.nux` serialization, DSP, end-to-end render).
 - GitHub Actions CI for Windows (MSVC) and Linux (GCC).
 
 ### Fixed
+- WAV export no longer applies live looping, so the render tail is silent instead
+  of repeating the pattern.
+- Loop retriggering of audio clips: a clip that starts at step 0 now plays again
+  on every pass of the loop.
+- `juce::File` objects are never built from a relative path any more (this was an
+  assertion on debug builds), and quoted command-line paths are unquoted.
 - Keyboard focus was grabbed before the main window was on screen, which tripped
   a JUCE assertion on start-up.
 - The sequencer grid painted over the track header column, hiding track names.

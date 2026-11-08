@@ -53,6 +53,10 @@ public:
     void loadProjectFile (const juce::File& file);
 
     void exportWav();
+    void importAudioFileInto (const juce::File& file, int trackIndex);
+
+    /** Builds a demo project that contains an audio clip. Used by the smoke test. */
+    void loadDemoProjectWithAudioClip (const juce::File& audioFile);
     void toggleAudioSettings();
     void showAbout();
 

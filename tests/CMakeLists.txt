@@ -5,9 +5,12 @@ target_sources(NUXTests PRIVATE
     ProjectModelTests.cpp
     SerializerTests.cpp
     DspTests.cpp
+    AudioClipTests.cpp
     EngineRenderTests.cpp
     ../src/nux_core/ProjectSerializer.cpp
     ../src/nux_core/TrackModel.cpp
+    ../src/nux_engine/AudioClipPlayer.cpp
+    ../src/nux_engine/AudioClipStore.cpp
     ../src/nux_engine/AudioEngine.cpp
     ../src/nux_engine/ChannelStrip.cpp
     ../src/nux_engine/Synth.cpp)

@@ -143,6 +143,102 @@ public:
             target.getParentDirectory().deleteRecursively();
         }
 
+        beginTest ("An imported audio clip is rendered into the mixdown");
+        {
+            // Build a project folder with a media file, exactly like a real project.
+            auto projectFolder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                     .getChildFile ("nux-engine-clip")
+                                     .getChildFile ("Song");
+            projectFolder.getChildFile ("media").createDirectory();
+
+            auto wavFile = projectFolder.getChildFile ("media").getChildFile ("tone.wav");
+            wavFile.deleteFile();
+
+            {
+                auto stream = std::unique_ptr<juce::FileOutputStream> (wavFile.createOutputStream());
+                juce::WavAudioFormat wav;
+                std::unique_ptr<juce::AudioFormatWriter> writer (
+                    wav.createWriterFor (stream.get(), 44100.0, 1, 16, {}, 0));
+                stream.release();
+
+                juce::AudioBuffer<float> tone (1, 44100);
+
+                for (int i = 0; i < 44100; ++i)
+                    tone.setSample (0, i, 0.6f * std::sin (juce::MathConstants<double>::twoPi * 330.0 * i / 44100.0));
+
+                writer->writeFromAudioSampleBuffer (tone, 0, 44100);
+                writer.reset();
+            }
+
+            ProjectState project = ProjectState::createDefault();
+
+            // Silence the drum sequencer so only the audio clip can produce sound.
+            for (auto& step : project.tracks[0].steps)
+                step.enabled = false;
+
+            project.tracks[2].type = TrackType::audio;
+            AudioClip clip;
+            clip.name = "tone";
+            clip.sourceFile = "media/tone.wav";
+            clip.startStep = 0;
+            clip.lengthSteps = 16;   // one bar at 120 BPM = 2 s, the clip is 1 s
+            project.tracks[2].audioClips.push_back (clip);
+
+            AudioEngine engine;
+            engine.setProjectState (&project);
+            engine.setMediaRootDirectory (projectFolder);
+            engine.prepareForOfflineRendering (44100.0, 512, 2);
+            engine.reloadAudioClips();
+
+            expect (engine.getNumLoadedClipFiles() >= 1, "The clip file should have been decoded");
+
+            auto target = projectFolder.getChildFile ("render.wav");
+            target.deleteFile();
+
+            // Render the bar once, without looping, so the tail is genuinely silent.
+            project.loopEnabled = false;
+            engine.getTransport().setLoopEnabled (false);
+
+            AudioEngine::ExportOptions options;
+            options.targetFile = target;
+            options.lengthSteps = 16;
+            options.tailSeconds = 0.3;
+
+            juce::String error;
+            expect (engine.exportToWav (options, error), "Export failed: " + error);
+
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (target));
+            expect (reader != nullptr);
+
+            if (reader != nullptr)
+            {
+                // Read the whole two second bar so the quarter measurements stay in range.
+                const auto samplesToRead = (int) juce::jmin (reader->lengthInSamples, (juce::int64) 88200);
+                juce::AudioBuffer<float> rendered (2, samplesToRead);
+                rendered.clear();
+                reader->read (&rendered, 0, samplesToRead, 0, true, true);
+
+                // The clip is one second long, so compare the first second with the tail
+                // of the bar. Every read stays inside the buffer.
+                const auto quarter = samplesToRead / 4;
+                const auto firstSecond = rendered.getMagnitude (0, 0, juce::jmin (44100, samplesToRead));
+                const auto lastQuarterSecond = quarter > 0
+                                                 ? rendered.getMagnitude (0, samplesToRead - quarter, quarter)
+                                                 : 0.0f;
+
+                expect (firstSecond > 0.05f, "The audio clip should be audible in the first second");
+                // Diagnostic detail: report the level in each quarter of the bar.
+                expect (lastQuarterSecond < firstSecond * 0.25f,
+                        "The clip should have stopped after one second, but the tail is still at "
+                        + juce::String (lastQuarterSecond));
+            }
+
+            target.deleteFile();
+            projectFolder.deleteRecursively();
+        }
+
         beginTest ("Transport advances and loops");
         {
             ProjectState project = ProjectState::createDefault();

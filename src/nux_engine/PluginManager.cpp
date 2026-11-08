@@ -36,8 +36,9 @@ juce::FileSearchPath PluginManager::getSearchPaths() const
 
     // On Windows the system VST3 folder is under Program Files.
    #if JUCE_WINDOWS
-    paths.add (juce::File ("C:\\Program Files\\Common Files\\VST3"));
-    paths.add (juce::File ("C:\\Program Files (x86)\\Common Files\\VST3"));
+    paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory)
+                   .getChildFile ("Common Files").getChildFile ("VST3"));
+    paths.add (juce::File ("C:/Program Files (x86)/Common Files/VST3"));
    #endif
 
     return paths;
@@ -80,8 +81,9 @@ juce::String PluginManager::getScanStatus() const
         return juce::String (plugins.size()) + " plugins available";
 
     const juce::ScopedLock lock (scanFileLock);
-    return currentScanFile.isEmpty() ? "Scanning plugins..."
-                                     : "Scanning " + juce::File (currentScanFile).getFileName();
+    return currentScanFile.isEmpty()
+                 ? "Scanning plugins..."
+                 : "Scanning " + juce::File::getCurrentWorkingDirectory().getChildFile (currentScanFile).getFileName();
 }
 
 void PluginManager::rebuildInfoList()
