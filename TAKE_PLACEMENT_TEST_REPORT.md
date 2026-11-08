@@ -106,7 +106,7 @@ take is never shorter.
 
 ## 5. CI — actual results
 
-Run [`42379016406`](https://github.com/hirushanethsara323-jpg/nux-daw/actions/runs/42379016406)
+Run [`42379016406`](https://github.com/NUXAudioTeam/nux-daw/actions/runs/42379016406)
 on commit `314889f`, branch `feature/take-placement`:
 
 | Job | Result | Evidence from the log |

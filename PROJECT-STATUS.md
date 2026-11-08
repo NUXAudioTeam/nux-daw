@@ -2,7 +2,7 @@
 
 > **දිනය:** 2026-11-07
 > **Branch:** `feature/audio-testing` · **HEAD:** device selection + round trip (new commit)
-> **Repo:** `hirushanethsara323-jpg/nux-daw` (private) · **PR:** [#4](https://github.com/hirushanethsara323-jpg/nux-daw/pull/4)
+> **Repo:** `NUXAudioTeam/nux-daw` (public) · **PR:** [#4](https://github.com/NUXAudioTeam/nux-daw/pull/4)
 > **Build:** Windows CI — Debug ✅ / Release ✅ · Linux Release ✅
 
 මේ ලේඛනය **එකම තැනකින් සම්පූර්ණ තත්ත්වය** දකින්න හදපු එකක්. හැම අංකයක්ම code එකේ, test output එකේ, නැත්නම් CI log එකේ බලලා තමයි ලියලා තියෙන්නේ. කිසිම දෙයක් "හොඳ වෙන්න ඇති" කියලා ලියලා නෑ.

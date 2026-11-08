@@ -64,7 +64,7 @@ none.
 - Git
 
 ```bat
-git clone --recurse-submodules https://github.com/hirushanethsara323-jpg/nux-daw.git
+git clone --recurse-submodules https://github.com/NUXAudioTeam/nux-daw.git
 cd nux-daw
 
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64

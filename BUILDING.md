@@ -18,7 +18,7 @@ a driver that exposes ASIO (e.g. an audio interface's own driver).
 ## 2. Get the source
 
 ```bat
-git clone --recurse-submodules https://github.com/hirushanethsara323-jpg/nux-daw.git
+git clone --recurse-submodules https://github.com/NUXAudioTeam/nux-daw.git
 cd nux-daw
 ```
 
