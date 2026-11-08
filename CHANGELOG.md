@@ -1,3 +1,115 @@
+## [Unreleased] - device selection and the device round trip
+
+### Added
+
+- **Device selection**: `DeviceSelection.{h,cpp}` lists the platform's devices, flags
+  virtual cables, pairs the two halves of one, and refuses a pairing that cannot work
+  (no input, missing device, half on another driver) with a reason that names the device.
+- **`AudioEngine::applyDeviceChoice()`** opens exactly the chosen output/input pair instead
+  of the system default, and returns the driver's own error text when it fails.
+- **Virtual Audio Lab UI** in AUDIO SETTINGS: output/input choosers, `[virtual]` labels,
+  OPEN PAIR and ROUND TRIP, with the verification level printed next to the measurement.
+- **`VirtualLoopback.{h,cpp}`**: plays a known tone into a chosen output, captures the
+  chosen input, trims the leading silence and measures what came back. A missing device
+  produces `skipped` with a reason; it can never produce a pass.
+- 13 test groups pinning the selection and honesty rules, registered with ctest.
+
+### Fixed
+
+- The suite reported one fewer group than it declared. `PluginHostTests` declares a group
+  that only runs when the VST3 test plugins are missing, so the count now differs by one by
+  design; documented in the test itself.
+
+## [Unreleased] - Virtual Audio Lab, step A (measurement maths)
+
+### Added
+- **Measurement engine** (`src/nux_engine/Measurements.{h,cpp}`): levels and AES17 clip
+  detection, Hann-FFT spectrum, AES17 THD / THD+N against a known fundamental, SNR,
+  stereo correlation / DC / crosstalk, 4x-oversampled true peak, BS.1770-4 gated loudness
+  with LRA, gain accuracy, sample-rate accuracy, and parabolic-interpolated frequency.
+- **Reference signals** (`src/nux_engine/TestSignals.{h,cpp}`): sine, square, triangle,
+  sawtooth, white and pink noise, DC, two tone, exponential sweep and impulse, each with
+  an analytically known RMS and each deterministic for a given seed.
+- **`tests/MeasurementTests.cpp`** (20 groups) of known-answer tests, so the maths is
+  checked against formulas rather than against whatever the engine happened to produce.
+- **`docs/AUDIO_MEASUREMENT_METHODS.md`** documenting every method, its standard, its
+  known-answer checks, and exactly what has *not* been verified.
+
+### Fixed
+- **Loudness read every measurement 0.691 LU low.** Each 400 ms block already carried the
+  BS.1770 `-0.691` offset; the averaging converted blocks back to power and then added it
+  again. The four non-full-scale reference cases still passed a loose 0.2 LU tolerance,
+  so only the full-scale case exposed it.
+- **K-weighting was an approximation, not the standard.** It used a generic
+  `makeHighShelf(1500 Hz, Q 0.7071, +4 dB)` and read a −20 dBFS stereo tone as
+  −20.73 LUFS. Now designed from the published pre-filter parameters
+  (`f0 = 1681.97 Hz`, `G = 3.9998 dB`, `Q = 0.70717`) and reads −20.00, which is what
+  ffmpeg / libebur128 reports for the same signal.
+- **`SpectrumResult::getMagnitudeAt()` did not interpolate** despite its header claiming
+  it did; it rounded to the nearest bin, which misread levels by up to 1.4 dB depending
+  on where a tone fell. Now uses parabolic interpolation.
+- **`measureCrosstalkDb()` returned an absolute level instead of a ratio**, reporting a
+  correct −60 dB leak as −69 dB. Now measured relative to the driven channel.
+- **Mono reference signals corrupted the heap.** The generator wrote channel 1
+  unconditionally, so any mono spec wrote past the end of the buffer. Silent in Release,
+  and it took the whole test run down with a segfault as soon as a mono case was added.
+
+### Changed
+- `NUXTests` takes `--list` and `--only=<group>` so a crash can be bisected to one group,
+  and writes unbuffered output so a crash leaves the running test's name in the CI log.
+  Windows CI previously reported nothing but "SegFault".
+
+## [Unreleased] - CI coverage
+
+### Added
+- **Windows Debug CI job** with a leak-detector gate. Release-only CI could never have
+  caught the `PluginRetirementQueue` leak, because JUCE only reports leaked objects in
+  Debug builds.
+- **ASIO compile check in Windows CI.** `JUCE_ASIO` defaults to `0`; a Linux build cannot
+  prove the flag reached the compiler, but the Windows runner can. The step fails loudly
+  if ASIO is not compiled in.
+- `--device-report` command line flag: prints driver types, devices, which are virtual
+  cables, whether ASIO is compiled in and usable, and a plain-English summary. The most
+  useful thing to ask for in a bug report.
+- CI now publishes test output and `AUDIO_TEST_REPORT.md` as artifacts, and prints the
+  device inventory on both Windows and Linux runners.
+
+### Fixed
+- `recover.sh` now installs and starts Xvfb. A missing display makes the GUI self-tests
+  segfault, which looks exactly like a code regression and cost real debugging time.
+
+## [Unreleased] - audio testing
+
+### Added
+- **Offline audio test suite** (`tests/OfflineAudioTests.cpp`, 13 groups) that needs no
+  sound card: 440 Hz accuracy at 44.1/48/88.2/96 kHz, level in dBFS, clipping at every
+  level, click-free ramps, identical stereo channels, every block size from 32 to 2048,
+  sample rates up to 192 kHz, bit-identical determinism, mute/solo/master fader
+  behaviour, and a full WAV write/read round trip.
+- `tests/SignalAnalysis.h` - frequency, peak, RMS, clipping, step-discontinuity and
+  channel-difference measurement used by the tests.
+- **Device inventory** (`src/nux_engine/AudioDeviceProbe.{h,cpp}`): lists driver types and
+  devices, recognises virtual cables (VB-CABLE, Voicemeeter, loopback adapters) by name,
+  reports ASIO only when a driver is really installed, and always produces a message
+  explaining what was checked.
+- `tests/DeviceProbeTests.cpp` (6 groups) covering the detection logic and the real
+  machine's inventory.
+- **`AUDIO_TEST_REPORT.md`** separating passed, simulated, virtual-device, physical and
+  ASIO tests, with the limitations spelled out.
+- `docs/hardware-checklist.md` - the manual checks that still need real hardware.
+
+### Fixed
+- **ASIO was never actually compiled in.** `JUCE_ASIO` defaults to `0` and was absent from
+  `CMakeLists.txt`, so the README's "ASIO where installed" was wrong. WASAPI, WASAPI
+  exclusive, DirectSound and (on Windows) ASIO are now set explicitly.
+- `probeAudioDevices()` reported 2 output channels for a driver type with **zero** devices,
+  because `getDefaultDeviceIndex()` returns an index even for an empty list. Channel
+  counts now come from the device list.
+- A device manager that had never been initialised reported no driver types at all,
+  which read as "no drivers exist". The probe now registers the platform types first.
+- The test tone's independence from mutes and the master fader is now deliberate and
+  pinned by a test, instead of being an accident of where it is summed in.
+
 ## [Unreleased]
 
 ### Added

@@ -75,6 +75,45 @@ AudioSettingsPanel::AudioSettingsPanel (AudioEngine& e)
 
     selector.setLookAndFeel (&getLookAndFeel());
 
+    addAndMakeVisible (labTitle);
+    labTitle.setText ("VIRTUAL AUDIO LAB", juce::dontSendNotification);
+    labTitle.setFont (theme::font::bold (11.0f));
+    labTitle.setColour (juce::Label::textColourId, theme::accent);
+
+    addAndMakeVisible (labHint);
+    labHint.setFont (theme::font::ui (10.0f));
+    labHint.setColour (juce::Label::textColourId, theme::textFaint);
+    labHint.setText ("Pick what plays and what records. A round trip proves the routing and "
+                     "the engine; a virtual cable result is never a hardware result.",
+                     juce::dontSendNotification);
+
+    for (auto* box : { &outputChooser, &inputChooser })
+    {
+        addAndMakeVisible (*box);
+        box->setColour (juce::ComboBox::backgroundColourId, theme::windowBg);
+        box->setColour (juce::ComboBox::textColourId, theme::text);
+        box->setColour (juce::ComboBox::outlineColourId, theme::outline);
+        box->setColour (juce::ComboBox::arrowColourId, theme::accent);
+    }
+
+    outputChooser.setTextWhenNothingSelected ("output device");
+    inputChooser.setTextWhenNothingSelected ("input device");
+
+    addAndMakeVisible (openDeviceButton);
+    openDeviceButton.onClick = [this] { openSelectedDevice(); };
+
+    addAndMakeVisible (roundTripButton);
+    roundTripButton.onClick = [this] { runRoundTrip(); };
+
+    addAndMakeVisible (labResult);
+    labResult.setFont (theme::font::mono (10.0f));
+    labResult.setColour (juce::Label::textColourId, theme::textFaint);
+    labResult.setJustificationType (juce::Justification::topLeft);
+    labResult.setMinimumHorizontalScale (0.85f);
+    labResult.setText ("No round trip has been run in this session.", juce::dontSendNotification);
+
+    refreshLabDevices();
+
     startTimerHz (20);
 }
 
@@ -157,6 +196,159 @@ void AudioSettingsPanel::timerCallback()
     }
 }
 
+void AudioSettingsPanel::refreshLabDevices()
+{
+    labOptions = listDeviceOptions (engine.getDeviceManager());
+
+    outputChooser.clear (juce::dontSendNotification);
+    inputChooser.clear (juce::dontSendNotification);
+
+    int id = 1;
+
+    // Menu IDs index into labOptions, so a choice can always be turned back into a device
+    // name without parsing the label.
+    auto optionIds = std::vector<int> (labOptions.size(), 0);
+
+    for (size_t i = 0; i < labOptions.size(); ++i)
+    {
+        optionIds[i] = id;
+
+        if (labOptions[i].canOutput)
+            outputChooser.addItem (labOptions[i].getLabel(), id);
+
+        if (labOptions[i].canInput)
+            inputChooser.addItem (labOptions[i].getLabel(), id);
+
+        ++id;
+    }
+
+    // Pre-select a virtual cable when one is installed, because that is the only pairing
+    // that can run a round trip on a machine without hardware.
+    const auto pair = findVirtualCablePair (labOptions);
+
+    if (pair.found)
+    {
+        for (size_t i = 0; i < labOptions.size(); ++i)
+        {
+            if (labOptions[i].deviceName == pair.outputName)
+                outputChooser.setSelectedId (optionIds[i], juce::dontSendNotification);
+
+            if (labOptions[i].deviceName == pair.inputName)
+                inputChooser.setSelectedId (optionIds[i], juce::dontSendNotification);
+        }
+
+        labHint.setText ("Virtual cable detected. A clean result proves the routing and the "
+                         "engine path, and nothing about a converter or a speaker.",
+                         juce::dontSendNotification);
+    }
+    else if (labOptions.empty())
+    {
+        labHint.setText ("No audio devices at all. The round trip stays SKIPPED - that is not "
+                         "a pass. Install a virtual cable or connect an interface to change it.",
+                         juce::dontSendNotification);
+    }
+    else
+    {
+        labHint.setText ("No virtual cable installed. A round trip needs a playback device and "
+                         "a matching capture device; without one it reports SKIPPED.",
+                         juce::dontSendNotification);
+    }
+}
+
+void AudioSettingsPanel::openSelectedDevice()
+{
+    const auto optionFor = [this] (int selectedId) -> const DeviceOption*
+    {
+        const auto index = (size_t) (selectedId - 1);
+
+        if (selectedId <= 0 || index >= labOptions.size())
+            return nullptr;
+
+        return &labOptions[index];
+    };
+
+    const auto* output = optionFor (outputChooser.getSelectedId());
+    const auto* input  = optionFor (inputChooser.getSelectedId());
+
+    if (output == nullptr)
+    {
+        labResult.setColour (juce::Label::textColourId, theme::warn);
+        labResult.setText ("Choose an output device first.", juce::dontSendNotification);
+        return;
+    }
+
+    const auto error = engine.applyDeviceChoice (output->typeName,
+                                                 output->deviceName,
+                                                 input != nullptr ? input->deviceName
+                                                                  : juce::String());
+
+    if (error.isEmpty())
+    {
+        labResult.setColour (juce::Label::textColourId, theme::accent);
+        labResult.setText ("Opened " + output->deviceName
+                             + (input != nullptr ? " / " + input->deviceName : juce::String()) + ".",
+                           juce::dontSendNotification);
+    }
+    else
+    {
+        labResult.setColour (juce::Label::textColourId, theme::warn);
+        labResult.setText ("Could not open that pair: " + error, juce::dontSendNotification);
+    }
+
+    refresh();
+}
+
+void AudioSettingsPanel::runRoundTrip()
+{
+    const auto toIndex = [] (int selectedId) { return (size_t) juce::jmax (0, selectedId - 1); };
+
+    nux::lab::LoopbackRequest request;
+    request.spec.type = nux::lab::SignalType::sine;
+    request.spec.frequency = 1000.0;
+    request.spec.amplitude = 0.25f;
+    request.seconds = 1.5;
+
+    const auto outputId = outputChooser.getSelectedId();
+    const auto inputId = inputChooser.getSelectedId();
+
+    if (outputId > 0 && toIndex (outputId) < labOptions.size())
+    {
+        request.choice.typeName = labOptions[toIndex (outputId)].typeName;
+        request.choice.outputName = labOptions[toIndex (outputId)].deviceName;
+    }
+
+    if (inputId > 0 && toIndex (inputId) < labOptions.size())
+        request.choice.inputName = labOptions[toIndex (inputId)].deviceName;
+
+    roundTripButton.setEnabled (false);
+    labResult.setColour (juce::Label::textColourId, theme::text);
+    labResult.setText ("Running... the panel stays blocked for about two seconds.",
+                       juce::dontSendNotification);
+
+    // Deliberately synchronous and short: the run owns the device, and pretending it is
+    // asynchronous while sharing a device manager would be a lie the user pays for later.
+    const auto outcome = nux::lab::runDeviceLoopback (request);
+
+    const auto level = juce::String (nux::lab::getVerificationName (outcome.result.verification));
+
+    auto text = juce::String ("Result: ") + level.toUpperCase()
+              + (outcome.verdict.isEmpty() ? juce::String (" (judged clean)")
+                                           : " - " + outcome.verdict)
+              + "\n" + outcome.result.summary;
+
+    if (outcome.result.captured)
+        text += "\nCaptured " + juce::String (outcome.result.numSamplesCaptured)
+              + " samples, " + juce::String (outcome.result.received.peakDb, 1) + " dBFS peak, "
+              + juce::String (outcome.result.gainDb, 2) + " dB gain change.";
+
+    labResult.setColour (juce::Label::textColourId,
+                         outcome.result.verification == nux::lab::Verification::skipped ? theme::warn
+                                                                                        : theme::text);
+    labResult.setText (text, juce::dontSendNotification);
+
+    roundTripButton.setEnabled (true);
+}
+
 void AudioSettingsPanel::drawMeter (juce::Graphics& g, juce::Rectangle<int> bounds,
                                     const juce::String& label, float peak,
                                     juce::Colour meterColour, bool showZeroWarning)
@@ -222,6 +414,23 @@ void AudioSettingsPanel::resized()
     title.setBounds (area.removeFromTop (24));
     status.setBounds (area.removeFromTop (20));
     deviceWarning.setBounds (area.removeFromTop (18).withWidth (area.getWidth()));
+
+    // The lab needs two choosers, two buttons and two lines of result.
+    auto labArea = area.removeFromBottom (108).reduced (0, 4);
+
+    labTitle.setBounds (labArea.removeFromTop (14));
+    labHint.setBounds (labArea.removeFromTop (26));
+
+    auto labRow = labArea.removeFromTop (24);
+    outputChooser.setBounds (labRow.removeFromLeft (labRow.getWidth() / 2 - 4));
+    labRow.removeFromLeft (8);
+    inputChooser.setBounds (labRow.removeFromLeft (labRow.getWidth() - 190));
+    labRow.removeFromLeft (8);
+    openDeviceButton.setBounds (labRow.removeFromLeft (86));
+    labRow.removeFromLeft (6);
+    roundTripButton.setBounds (labRow);
+
+    labResult.setBounds (labArea);
 
     auto hintArea = area.removeFromBottom (40);
     hint.setBounds (hintArea.reduced (0, 4));

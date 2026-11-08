@@ -18,7 +18,8 @@ A digital audio workstation for Windows, written in C++20 with
 
 | Area | Status |
 |---|---|
-| Audio device setup (WASAPI, DirectSound, ASIO where installed) | ✅ |
+| Audio device setup (WASAPI, WASAPI exclusive, DirectSound on Windows) | ✅ |
+| ASIO backend compiled in on Windows | ⚠️ unverified - no ASIO driver has been tested |
 | Stereo engine, 16 voices per track, MIDI input | ✅ |
 | Built-in synth: Analog Kit, Sub Bass, Pluck, Warm Pad, Electric Keys | ✅ |
 | Channel strip: EQ, compressor, delay, reverb, pan, fader, mute/solo, metering | ✅ |
@@ -37,7 +38,7 @@ A digital audio workstation for Windows, written in C++20 with
 | **440 Hz test tone + input/output meters in AUDIO settings** | ✅ |
 | Device disconnection detection and automatic reopen | ✅ |
 | Automation, MIDI learn | ❌ not yet |
-| ASIO, CPU metering, latency compensation, sidechain | ❌ not yet |
+| ASIO **verified working**, CPU metering, latency compensation, sidechain | ❌ not yet |
 
 > **Recording caveat.** The recorder is verified with simulated input through the same
 > ring buffer the audio thread uses, and the device is opened with 2 input channels.
@@ -45,6 +46,12 @@ A digital audio workstation for Windows, written in C++20 with
 > hardware — please record a take and check it before relying on it.
 
 Screenshots of every workspace live in [`docs/screenshots/`](docs/screenshots).
+
+**Audio testing status:** see [`AUDIO_TEST_REPORT.md`](AUDIO_TEST_REPORT.md) for exactly
+what has been verified, what was simulated, and what still needs real hardware. The short
+version: the DSP and file I/O are tested offline (114 test groups, run by ctest as 15
+entries); **no physical audio device has been tested**, because the build machine has
+none.
 
 ---
 

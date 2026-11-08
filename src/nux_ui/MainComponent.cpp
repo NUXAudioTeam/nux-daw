@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "../nux_engine/AudioDeviceProbe.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -1447,6 +1448,58 @@ void MainComponent::showAudioSettingsForDemo (bool startTestTone)
 
     if (startTestTone)
         engine.setTestToneEnabled (true);
+}
+
+juce::String MainComponent::runDeviceReport()
+{
+    juce::StringArray report;
+
+    report.add ("NUX audio device report");
+    report.add ("  build: " + juce::String (constants::versionString));
+    report.add ("  platform: " + juce::SystemStats::getOperatingSystemName());
+    report.add ("  cpu: " + juce::SystemStats::getCpuVendor() + " " + juce::SystemStats::getCpuModel());
+    report.add ("");
+
+    // Probe a fresh manager, so the report describes the machine rather than whatever
+    // the app happens to have open.
+    juce::AudioDeviceManager manager;
+    const auto inventory = probeAudioDevices (manager);
+
+    report.add ("Driver types found: " + juce::String ((int) inventory.drivers.size()));
+
+    for (const auto& driver : inventory.drivers)
+    {
+        report.add ("  [" + driver.typeName + "]  available = "
+                      + juce::String (driver.available ? "yes" : "no")
+                      + ", outputs = " + juce::String (driver.numOutputs)
+                      + ", inputs = " + juce::String (driver.numInputs));
+
+        if (driver.deviceNames.isEmpty())
+        {
+            report.add ("      (no output devices)");
+        }
+        else
+        {
+            for (const auto& name : driver.deviceNames)
+                report.add ("      out: " + name
+                              + (isVirtualCableName (name) ? "   [virtual]" : ""));
+        }
+
+        if (driver.detail.isNotEmpty())
+            report.add ("      note: " + driver.detail);
+    }
+
+    report.add ("");
+    report.add ("ASIO compiled in: " + juce::String (platformSupportsAsio() ? "yes" : "no"));
+    report.add ("ASIO driver usable: " + juce::String (inventory.hasAsio() ? "yes" : "no"));
+    report.add ("Virtual cable present: " + juce::String (inventory.hasVirtualDevice() ? "yes" : "no"));
+    report.add ("");
+    report.add ("Summary: " + describeAudioAvailability (inventory));
+
+    const auto status = engine.getAudioStatusMessage();
+    report.add ("Engine status: " + status);
+
+    return report.joinIntoString ("\n");
 }
 
 juce::Component* MainComponent::getAudioSettingsComponentForDemo() const

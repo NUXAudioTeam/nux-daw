@@ -13,6 +13,7 @@
 #include "../src/nux_core/ProjectSerializer.h"
 
 #include <cmath>
+#include <memory>
 
 namespace nux::tests
 {
@@ -99,6 +100,10 @@ public:
         {
             // Not a hidden pass: the test says out loud that it could not run. CI builds
             // the NUXTestGain / NUXTestTone targets, so the hosting path is verified there.
+            //
+            // This group only exists when the plugins are missing, which is why a run
+            // reports one fewer group than the file declares. That difference is by
+            // design: with the plugins built, the eight real hosting groups run instead.
             beginTest ("Test plugins are available");
             logMessage ("SKIPPED: the VST3 test plugins were not built, so plugin hosting "
                         "was not verified in this run. Build the NUXTestGain and NUXTestTone targets "
@@ -292,7 +297,8 @@ public:
                                     "uniqueId=\"1234567890\" isInstrument=\"0\" numInputs=\"2\" numOutputs=\"2\"/>";
             broken.stateSaved = false;
 
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             ProjectState project = ProjectState::createDefault();
             engine.setProjectState (&project);
             engine.setPluginManager (&manager);
@@ -315,7 +321,8 @@ public:
 
         beginTest ("A hosted instrument plays the notes sent to its track");
         {
-            AudioEngine engine;
+            auto enginePtr = std::make_unique<AudioEngine>();
+            auto& engine = *enginePtr;
             ProjectState project = ProjectState::createDefault();
             engine.setProjectState (&project);
             engine.setPluginManager (&manager);

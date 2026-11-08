@@ -44,3 +44,4 @@ render-output/
 .env
 *.token
 secrets.json
+build-debug/

@@ -56,6 +56,15 @@ public:
 
     /** Opens the default audio device. Returns an empty string on success. */
     juce::String initialiseAudio();
+
+    /** Opens the device pair the user chose instead of whatever the system calls default.
+
+        Returns an empty string on success, or the reason nothing opened - which the audio
+        settings panel shows verbatim, because "audio did not work" is not a useful message.
+        Safe to call from the message thread only; it stops and restarts the device. */
+    juce::String applyDeviceChoice (const juce::String& typeName,
+                                    const juce::String& outputName,
+                                    const juce::String& inputName);
     void shutdownAudio();
     bool isAudioAvailable() const noexcept { return audioReady; }
     juce::String getAudioStatusMessage() const;

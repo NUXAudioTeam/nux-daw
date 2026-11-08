@@ -62,6 +62,12 @@ target_sources(NUX PRIVATE
     src/nux_engine/AudioClipPlayer.cpp
     src/nux_engine/AudioClipStore.cpp
     src/nux_engine/InputRecorder.cpp
+    src/nux_engine/AudioDeviceProbe.cpp
+    src/nux_engine/Measurements.cpp
+    src/nux_engine/TestSignals.cpp
+    src/nux_engine/RoundTrip.cpp
+    src/nux_engine/DeviceSelection.cpp
+    src/nux_engine/VirtualLoopback.cpp
     src/nux_engine/AudioEngine.cpp
     src/nux_engine/ChannelStrip.cpp
     src/nux_engine/Synth.cpp
@@ -87,7 +93,13 @@ target_compile_definitions(NUX PRIVATE
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_REPORT_APP_USAGE=0
     JUCE_USE_WINRT_MIDI=0
-    JUCE_STRICT_REFCOUNTEDPOINTER=1)
+    JUCE_STRICT_REFCOUNTEDPOINTER=1
+    # Audio backends. ASIO is compiled in on Windows only, where JUCE ships the SDK
+    # header it needs; on other platforms the flag is off so the build stays clean.
+    JUCE_WASAPI=1
+    $<$<PLATFORM_ID:Windows>:JUCE_ASIO=1>
+    $<$<PLATFORM_ID:Windows>:JUCE_WASAPI_EXCLUSIVE=1>
+    $<$<PLATFORM_ID:Windows>:JUCE_DIRECTSOUND=1>)
 
 target_link_libraries(NUX PRIVATE
     juce::juce_audio_utils
@@ -125,5 +137,9 @@ endif()
 option(NUX_BUILD_TESTS "Build the NUX unit tests" ON)
 
 if (NUX_BUILD_TESTS)
+    # Without enable_testing() at the top level, ctest finds no tests at all and
+    # reports "No tests were found!!!" - which CI treated as a pass, so the unit
+    # tests had never actually been run by the workflow.
+    enable_testing()
     add_subdirectory(tests)
 endif()

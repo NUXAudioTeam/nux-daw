@@ -30,10 +30,22 @@ if ! command -v cmake > /dev/null; then
         libasound2-dev libfreetype-dev libfontconfig1-dev \
         libx11-dev libxext-dev libxinerama-dev libxrandr-dev \
         libxcursor-dev libxi-dev libxcomposite-dev libgtk-3-dev \
-        libcurl4-openssl-dev xvfb
+        libcurl4-openssl-dev \
+        xvfb
 fi
 echo "cmake:  $(cmake --version | head -1)"
 echo "cpus:   $(nproc)   memory: $(free -m | awk '/^Mem:/ {print $2}') MB"
+
+step "2b/6 virtual display"
+# The GUI self-tests (--undo-self-test, --device-report, --screenshot) need a display.
+# Without one the app segfaults, which looks exactly like a code regression - it is not.
+if ! pgrep -x Xvfb > /dev/null; then
+    (Xvfb :99 -screen 0 1600x1000x24 > /dev/null 2>&1 &)
+    sleep 2
+    echo "started Xvfb on :99 (use DISPLAY=:99)"
+else
+    echo "Xvfb already running"
+fi
 
 step "3/6 git remote"
 cd "$REPO" || exit 1

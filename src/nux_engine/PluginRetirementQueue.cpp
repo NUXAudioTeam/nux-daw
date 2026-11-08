@@ -5,8 +5,8 @@ namespace nux
 {
 PluginRetirementQueue& PluginRetirementQueue::getInstance()
 {
-    // Intentionally leaked: the queue is used during window teardown, when a
-    // function-local static could already have been destroyed.
+    // Created on first use and destroyed by DeletedAtShutdown after the message loop
+    // stops, so it is safe during window teardown and still cleaned up properly.
     static PluginRetirementQueue* instance = new PluginRetirementQueue();
     return *instance;
 }
