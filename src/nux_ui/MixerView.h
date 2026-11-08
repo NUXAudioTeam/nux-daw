@@ -5,6 +5,7 @@
 #include "../nux_core/ProjectDocument.h"
 #include "../nux_engine/AudioEngine.h"
 #include "Widgets.h"
+#include "InsertEditorPanel.h"
 
 namespace nux
 {
@@ -26,6 +27,11 @@ public:
 
     std::function<void()> onEdited;
     std::function<void (int)> onInsertClicked;   // insert slot index
+    /** Double-clicking an insert opens the parameter editor for that slot. */
+    std::function<void (int, juce::String)> onInsertDoubleClicked;
+
+    /** Name shown in the parameter editor's title. */
+    juce::String getStripDisplayName() const;
 
 private:
     void showInsertMenu (int slotIndex);
@@ -66,6 +72,17 @@ public:
 
     std::function<void()> onProjectEdited;
 
+    /** Shows the parameter editor for one insert. Pass slotIndex < 0 to hide it. */
+    void showInsertEditor (ChannelStripComponent::Kind kind, int stripIndex, int slotIndex,
+                           const juce::String& stripName);
+    void hideInsertEditor();
+
+    /** The strip that the editor currently targets, or nullptr. */
+    ChannelStripComponent* getEditorSourceStrip() const;
+
+    /** The open parameter editor, or nullptr. */
+    InsertEditorPanel* getInsertEditor() const noexcept { return insertEditor.get(); }
+
 private:
     void timerCallback() override;
 
@@ -77,5 +94,11 @@ private:
     std::vector<std::unique_ptr<ChannelStripComponent>> strips;
 
     juce::Label titleLabel;
+
+    /** The insert parameter editor floats over the mixer, bottom right. */
+    std::unique_ptr<InsertEditorPanel> insertEditor;
+    ChannelStripComponent::Kind editorKind = ChannelStripComponent::Kind::track;
+    int editorStripIndex = -1;
+    int editorSlotIndex = -1;
 };
 }

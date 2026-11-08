@@ -28,6 +28,8 @@ public:
     std::function<void()> onTempoChanged;
     std::function<void()> onAudioSettingsRequested;
     std::function<void()> onSaveRequested;
+    /** The record button; the host decides what recording means. */
+    std::function<void()> onRecordToggled;
 
 private:
     void timerCallback() override;

@@ -1,4 +1,5 @@
 #include "ChannelStrip.h"
+#include "PluginRetirementQueue.h"
 
 namespace nux
 {
@@ -345,13 +346,19 @@ void ChannelStrip::reset()
     for (auto& insert : inserts)
         insert.reset();
 
+    for (auto& slot : pluginSlots)
+        if (slot != nullptr)
+            slot->reset();
+
     smoothedGain.setCurrentAndTargetValue (dbToGain (params.volumeDb.load()));
     peakLevel[0].store (0.0f);
     peakLevel[1].store (0.0f);
 }
 
-void ChannelStrip::processInserts (juce::AudioBuffer<float>& buffer)
+void ChannelStrip::processInserts (juce::AudioBuffer<float>& buffer, juce::MidiBuffer* midi)
 {
+    const auto numSamples = getCurrentBlockSamples();
+
     for (int i = 0; i < constants::maxTrackInserts; ++i)
     {
         const auto type = params.insertTypes[(size_t) i].load (std::memory_order_acquire);
@@ -359,7 +366,72 @@ void ChannelStrip::processInserts (juce::AudioBuffer<float>& buffer)
         if (type == (int) InsertType::none)
             continue;
 
-        inserts[(size_t) i].process (buffer, params.inserts[(size_t) i], getCurrentBlockSamples());
+        if (type == (int) InsertType::plugin)
+        {
+            // A hosted plugin replaces the built-in processor for this slot. A slot
+            // whose plugin failed to load stays as a pass-through rather than
+            // silencing the channel.
+            if (auto* plugin = pluginSlots[(size_t) i].get())
+            {
+                if (params.inserts[(size_t) i].bypassed)
+                    continue;
+
+                plugin->process (buffer, numSamples, midi);
+            }
+
+            continue;
+        }
+
+        inserts[(size_t) i].process (buffer, params.inserts[(size_t) i], numSamples);
+    }
+}
+
+void ChannelStrip::setPluginSlot (int index, std::unique_ptr<PluginSlot> slot)
+{
+    jassert (juce::isPositiveAndBelow (index, constants::maxTrackInserts));
+
+    if (! juce::isPositiveAndBelow (index, constants::maxTrackInserts))
+        return;
+
+    auto& position = pluginSlots[(size_t) index];
+
+    // Retire the outgoing instance after a grace period so an audio block that is
+    // still holding it can finish. The device is stopped around graph edits, but
+    // this keeps destruction safe even if that ever changes.
+    if (auto outgoing = std::move (position))
+        PluginRetirementQueue::getInstance().retire (std::move (outgoing));
+
+    position = std::move (slot);
+
+    if (position != nullptr && position->isPrepared())
+        position->reset();   // start every newly loaded plugin from a clean state
+
+    // An instrument slot generates the strip input and must suppress it.
+    bool hasInstrument = false;
+
+    for (int i = 0; i < constants::maxTrackInserts; ++i)
+        if (auto* p = pluginSlots[(size_t) i].get())
+            if (p->replacesInput() && ! params.inserts[(size_t) i].bypassed)
+                hasInstrument = true;
+
+    instrumentSlotActive.store (hasInstrument, std::memory_order_release);
+}
+
+void ChannelStrip::preparePlugins (double newRate, int maxBlockSize, int numChannels)
+{
+    for (auto& slot : pluginSlots)
+        if (slot != nullptr)
+            slot->prepareForNewSampleRate (newRate, maxBlockSize, numChannels);
+}
+
+void ChannelStrip::sanitisePluginSlotTypes()
+{
+    for (int i = 0; i < constants::maxTrackInserts; ++i)
+    {
+        const auto type = params.insertTypes[(size_t) i].load (std::memory_order_acquire);
+
+        if (type == (int) InsertType::plugin && pluginSlots[(size_t) i] == nullptr)
+            params.setInsert (i, InsertType::none);   // plugin missing: drop the slot
     }
 }
 
@@ -409,7 +481,7 @@ void ChannelStrip::updateMeters (const juce::AudioBuffer<float>& buffer)
     }
 }
 
-void ChannelStrip::process (juce::AudioBuffer<float>& buffer, float inputGain)
+void ChannelStrip::process (juce::AudioBuffer<float>& buffer, float inputGain, juce::MidiBuffer* midi)
 {
     if (! prepared || getCurrentBlockSamples() == 0)
         return;
@@ -420,7 +492,7 @@ void ChannelStrip::process (juce::AudioBuffer<float>& buffer, float inputGain)
     if (! juce::approximatelyEqual (inputGain, 1.0f))
         buffer.applyGain (inputGain);
 
-    processInserts (buffer);
+    processInserts (buffer, midi);
     applyFaderPanMute (buffer);
     updateMeters (buffer);
 }

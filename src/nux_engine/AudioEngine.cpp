@@ -40,7 +40,10 @@ juce::String AudioEngine::initialiseAudio()
     deviceManager.addAudioCallback (this);
     deviceManager.addMidiInputDeviceCallback ({}, this);
 
-    lastDeviceError = deviceManager.initialise (0, 2, nullptr, true);
+    // Two input channels are requested so a microphone or interface can be recorded;
+    // a device that has no inputs simply reports zero available channels instead of
+    // failing to open.
+    lastDeviceError = deviceManager.initialise (2, 2, nullptr, true);
     audioReady = deviceManager.getCurrentAudioDevice() != nullptr;
 
     if (! audioReady && lastDeviceError.isEmpty())
@@ -62,8 +65,16 @@ void AudioEngine::shutdownAudio()
     graphPrepared = false;
 }
 
+juce::String AudioEngine::getLastDeviceError() const
+{
+    return lastDeviceError;
+}
+
 juce::String AudioEngine::getAudioStatusMessage() const
 {
+    if (deviceLost.load (std::memory_order_acquire) && audioReady)
+        return "Device disconnected - reopening...";
+
     if (! audioReady)
         return lastDeviceError.isNotEmpty() ? lastDeviceError : "No audio device open";
 
@@ -154,6 +165,8 @@ void AudioEngine::rebuildGraph()
             track.buffer.setSize (2, blockSize, false, true, true);
             track.clipBuffer.setSize (2, blockSize, false, true, true);
             track.strip.prepare (sampleRate, blockSize, 2);
+            track.strip.preparePlugins (sampleRate, blockSize, 2);
+            track.strip.sanitisePluginSlotTypes();
             track.clipPlayer.prepare (sampleRate, blockSize);
         }
     }
@@ -462,6 +475,9 @@ void AudioEngine::prepare (double newSampleRate, int newBlockSize)
         bus.prepareBus (sampleRate, blockSize);
 
     masterBus.prepareMaster (sampleRate, blockSize);
+    preparePluginsForGraph();
+    inputRecorder.prepare (sampleRate, blockSize, 2);
+    testTone.prepare (sampleRate);
     recordScratch.setSize (2, blockSize, false, true, true);
 
     scopeDecimation = juce::jmax (1, (int) std::round (sampleRate / 22050.0));
@@ -506,15 +522,58 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
 void AudioEngine::audioDeviceStopped()
 {
+    // The device went away (unplugged interface, driver reset). Keep the flags honest
+    // so the UI can say so instead of looking like a silent bug, and stop anything
+    // that would otherwise be left running.
     graphPrepared = false;
+    audioReady = false;
+    deviceLost.store (true, std::memory_order_release);
+
+    testTone.reset();
 }
 
-void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*, int,
+void AudioEngine::audioDeviceError (const juce::String& errorMessage)
+{
+    lastDeviceError = errorMessage.isNotEmpty() ? errorMessage : juce::String ("The audio device reported an error.");
+    deviceLost.store (true, std::memory_order_release);
+}
+
+bool AudioEngine::tryReopenDevice()
+{
+    // Called from the UI timer when the device was lost: reopen and prepare again.
+    if (deviceManager.getCurrentAudioDevice() != nullptr && graphPrepared)
+    {
+        deviceLost.store (false, std::memory_order_release);
+        return true;
+    }
+
+    const auto error = deviceManager.initialise (2, 2, nullptr, true);
+    auto* device = deviceManager.getCurrentAudioDevice();   // non-const: getters are not const
+
+    if (device == nullptr)
+    {
+        lastDeviceError = error.isNotEmpty() ? error : juce::String ("No audio device is available.");
+        return false;
+    }
+
+    lastDeviceError.clear();
+    audioReady = true;
+    deviceLost.store (false, std::memory_order_release);
+    prepare (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
+    return true;
+}
+
+void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                                   int numInputChannels,
                                                    float* const* outputChannelData,
                                                    int numOutputChannels,
                                                    int numSamples,
                                                    const juce::AudioIODeviceCallbackContext&)
 {
+    // The recorded signal is the *input*, not the mixdown: capturing the output
+    // would make every take a copy of what the speakers were already playing.
+    inputRecorder.pushInput (inputChannelData, numInputChannels, numSamples);
+
     if (numOutputChannels <= 0 || numSamples <= 0 || outputChannelData == nullptr)
         return;
 
@@ -687,7 +746,10 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
     }();
 
     for (auto& midi : sequencerMidi) midi.clear();
-    for (auto& midi : previewMidi)   midi.clear();
+
+    // previewMidi is deliberately *not* cleared here. It holds the notes the UI and
+    // the MIDI input queued since the previous block, and clearing it at the top of
+    // the block threw them away before they were ever played. It is consumed below.
 
     runSequencer (numSamples);
     processNoteReleases (numSamples);
@@ -701,6 +763,10 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
     {
         auto& track = tracks[(size_t) i];
         auto& buffer = track.buffer;
+
+        // The strip must be told the block length before it processes anything;
+        // without this every track's inserts, fader, pan, mute and meters are skipped.
+        track.strip.beginBlock (numSamples);
 
         buffer.clear (0, numSamples);
 
@@ -721,10 +787,31 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
         }
 
         auto& midi = sequencerMidi[(size_t) i];
-        midi.swapWith (previewMidi[(size_t) i]);
-        midi.addEvents (previewMidi[(size_t) i], 0, -1, 0);
 
-        track.synth.renderNextBlock (buffer, midi, 0, numSamples);
+        {
+            // Hand the queued preview notes over, then clear the queue for the next
+            // block. The lock is only ever held for a handful of events; it stops the
+            // UI thread and the MIDI thread from writing into the buffer we are using.
+            const juce::SpinLock::ScopedLockType lock (previewMidiLock);
+            midi.swapWith (previewMidi[(size_t) i]);
+            midi.addEvents (previewMidi[(size_t) i], 0, -1, 0);
+            previewMidi[(size_t) i].clear();
+        }
+
+        if (track.strip.hasInstrumentPlugin())
+        {
+            // A hosted instrument generates the track's audio itself; the synth is
+            // bypassed so the two sources are never summed together.
+            track.synth.renderNextBlock (buffer, midi, 0, numSamples);
+
+            // The synth was given the MIDI buffer and consumed nothing from it, so
+            // the same events are handed to the plugin by the strip below.
+            buffer.clear (0, numSamples);
+        }
+        else
+        {
+            track.synth.renderNextBlock (buffer, midi, 0, numSamples);
+        }
 
         const auto soloed = tracksSoloed[(size_t) i].load (std::memory_order_relaxed);
         const auto audible = anySolo ? soloed : true;
@@ -735,7 +822,7 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
             continue;
         }
 
-        track.strip.process (buffer, 1.0f);
+        track.strip.process (buffer, 1.0f, &midi);
 
         const auto busIndex = juce::jlimit (0, constants::numMixerBuses - 1, trackBusIndex[(size_t) i]);
         buses[(size_t) busIndex].addFromTrack (buffer);
@@ -745,6 +832,20 @@ void AudioEngine::renderBlock (juce::AudioBuffer<float>& output, int numSamples)
         bus.processBus (masterBus);
 
     masterBus.renderMaster (output, nullptr);
+
+    // The test tone is added *after* the master chain so it is audible even when every
+    // track is muted, which is the whole point of a device test.
+    testTone.render (output, numSamples);
+
+    // Publish the peak of what actually went to the device, for the output meters.
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const auto index = juce::jmin (ch, output.getNumChannels() - 1);
+        const auto peak = index >= 0 ? output.getMagnitude (index, 0, numSamples) : 0.0f;
+        const auto previous = outputPeaks[(size_t) ch].load (std::memory_order_relaxed);
+        outputPeaks[(size_t) ch].store (juce::jmax (peak, previous * 0.88f), std::memory_order_relaxed);
+    }
+
     updateScope (output, numSamples);
 }
 
@@ -796,6 +897,21 @@ void AudioEngine::togglePlay()
         play();
 }
 
+void AudioEngine::setTestToneEnabled (bool shouldBeOn)
+{
+    if (! shouldBeOn)
+    {
+        testTone.setLevel (0.0f);
+        return;
+    }
+
+    // Turning the tone on must give an audible default rather than the bare minimum:
+    // the earlier code clamped the level *up* to 0.05 and then found it already above
+    // zero, so the tone came out almost inaudible.
+    if (testTone.getLevel() <= 0.0f)
+        testTone.setLevel (0.25f);
+}
+
 void AudioEngine::panic()
 {
     for (int i = 0; i < constants::maxTracks; ++i)
@@ -809,6 +925,11 @@ void AudioEngine::panic()
 
     masterBus.reset();
     for (auto& bus : buses) bus.reset();
+
+    // A panic must also stop the test tone, or "silence everything" would still hum.
+    testTone.reset();
+    for (auto& peak : outputPeaks)
+        peak.store (0.0f, std::memory_order_relaxed);
 }
 
 void AudioEngine::startRecording()
@@ -827,9 +948,12 @@ void AudioEngine::triggerPreviewNote (int trackIndex, int midiNote, float veloci
     if (! juce::isPositiveAndBelow (trackIndex, trackCount))
         return;
 
-    // Preview notes are queued for the next block; the audio callback owns them.
-    previewMidi[(size_t) trackIndex].addEvent (
-        juce::MidiMessage::noteOn (1, midiNote, juce::jlimit (0.05f, 1.0f, velocity)), 0);
+    // Preview notes are queued for the next block; the audio callback consumes them.
+    {
+        const juce::SpinLock::ScopedLockType lock (previewMidiLock);
+        previewMidi[(size_t) trackIndex].addEvent (
+            juce::MidiMessage::noteOn (1, midiNote, juce::jlimit (0.05f, 1.0f, velocity)), 0);
+    }
 
     const auto beats = 60.0 / juce::jmax (1.0, transport.getTempo());
     noteReleaseCountdown[(size_t) trackIndex][(size_t) juce::jlimit (0, 127, midiNote)] =
@@ -1038,5 +1162,450 @@ bool AudioEngine::exportToWav (const ExportOptions& options, juce::String& error
     }
 
     return success;
+}
+
+//==============================================================================
+// Hosted plugins
+//==============================================================================
+ChannelStrip* AudioEngine::findStrip (StripKind kind, int stripIndex)
+{
+    if (kind == StripKind::track)
+        return juce::isPositiveAndBelow (stripIndex, trackCount) ? &tracks[(size_t) stripIndex].strip : nullptr;
+
+    if (kind == StripKind::bus)
+        return juce::isPositiveAndBelow (stripIndex, constants::numMixerBuses) ? &buses[(size_t) stripIndex] : nullptr;
+
+    return &masterBus;
+}
+
+void AudioEngine::stopDeviceForGraphEdit()
+{
+    if (audioReady)
+    {
+        deviceManager.removeAudioCallback (this);
+        deviceManager.closeAudioDevice();
+    }
+}
+
+void AudioEngine::restartDeviceAfterGraphEdit()
+{
+    if (audioReady)
+    {
+        deviceManager.initialise (2, 2, nullptr, true);
+        deviceManager.addAudioCallback (this);
+        audioReady = deviceManager.getCurrentAudioDevice() != nullptr;
+    }
+}
+
+std::unique_ptr<PluginSlot> AudioEngine::createSlotFor (const PluginReference& reference,
+                                                        bool wantMidi,
+                                                        juce::String& error)
+{
+    error.clear();
+
+    if (pluginManager == nullptr)
+    {
+        error = "The plugin manager is not available.";
+        return nullptr;
+    }
+
+    if (! reference.isValid())
+    {
+        error = "The project does not describe a plugin for this slot.";
+        return nullptr;
+    }
+
+    // PluginDescription stores itself as XML; that text is what the project keeps.
+    juce::PluginDescription description;
+
+    if (auto xml = juce::parseXML (reference.descriptionXml))
+        description.loadFromXml (*xml);
+
+    if (description.name.isEmpty())
+    {
+        error = "The stored plugin description could not be read.";
+        return nullptr;
+    }
+
+    auto instance = pluginManager->createInstance (description, sampleRate, blockSize, error);
+
+    if (instance == nullptr)
+        return nullptr;
+
+    return std::make_unique<PluginSlot> (std::move (instance), sampleRate, blockSize, 2, wantMidi);
+}
+
+juce::String AudioEngine::loadInsertPlugin (StripKind kind, int stripIndex, int slotIndex)
+{
+    auto* strip = findStrip (kind, stripIndex);
+
+    if (strip == nullptr)
+        return "That channel does not exist.";
+
+    if (! juce::isPositiveAndBelow (slotIndex, constants::maxTrackInserts))
+        return "That insert slot does not exist.";
+
+    if (projectState == nullptr)
+        return "No project is open.";
+
+    InsertSlot* modelSlot = nullptr;
+    juce::String referenceState;
+
+    if (kind == StripKind::track && juce::isPositiveAndBelow (stripIndex, (int) projectState->tracks.size()))
+        modelSlot = &projectState->tracks[(size_t) stripIndex].inserts[(size_t) slotIndex];
+    else if (kind == StripKind::bus && juce::isPositiveAndBelow (stripIndex, constants::numMixerBuses))
+        modelSlot = &projectState->buses[(size_t) stripIndex].inserts[(size_t) slotIndex];
+    else if (kind == StripKind::master)
+        modelSlot = &projectState->master.inserts[(size_t) slotIndex];
+
+    if (modelSlot == nullptr)
+        return "That insert slot does not exist in the project.";
+
+    juce::String error;
+    auto slot = createSlotFor (modelSlot->plugin, true, error);
+
+    if (slot == nullptr)
+        return error.isNotEmpty() ? error : "The plugin could not be loaded.";
+
+    referenceState = modelSlot->pluginStateBase64;
+
+    // Restore the saved parameter/state blob before the plugin starts processing.
+    if (referenceState.isNotEmpty())
+    {
+        juce::MemoryBlock state;
+        state.fromBase64Encoding (referenceState);
+
+        if (state.getSize() > 0)
+            slot->getInstance()->setStateInformation (state.getData(), (int) state.getSize());
+    }
+
+    stopDeviceForGraphEdit();
+
+    strip->setPluginSlot (slotIndex, std::move (slot));
+
+    auto& params = strip->getParameters();
+    params.inserts[(size_t) slotIndex].type = InsertType::plugin;
+    params.inserts[(size_t) slotIndex].bypassed = false;
+    params.insertTypes[(size_t) slotIndex].store ((int) InsertType::plugin, std::memory_order_release);
+
+    restartDeviceAfterGraphEdit();
+    return {};
+}
+
+juce::String AudioEngine::loadTrackInstrument (int trackIndex)
+{
+    if (! juce::isPositiveAndBelow (trackIndex, trackCount) || projectState == nullptr)
+        return "That track does not exist.";
+
+    if (! juce::isPositiveAndBelow (trackIndex, (int) projectState->tracks.size()))
+        return "That track does not exist.";
+
+    const auto& modelTrack = projectState->tracks[(size_t) trackIndex];
+
+    juce::String error;
+    auto slot = createSlotFor (modelTrack.instrumentPlugin, true, error);
+
+    if (slot == nullptr)
+        return error.isNotEmpty() ? error : "The plugin could not be loaded.";
+
+    if (modelTrack.instrumentStateBase64.isNotEmpty())
+    {
+        juce::MemoryBlock state;
+        state.fromBase64Encoding (modelTrack.instrumentStateBase64);
+
+        if (state.getSize() > 0)
+            slot->getInstance()->setStateInformation (state.getData(), (int) state.getSize());
+    }
+
+    stopDeviceForGraphEdit();
+
+    // The instrument replaces the sampler, so it lives in the first insert slot of
+    // the track's strip: the same mechanism as an effect, with the input suppressed.
+    tracks[(size_t) trackIndex].strip.setPluginSlot (0, std::move (slot));
+
+    auto& params = tracks[(size_t) trackIndex].strip.getParameters();
+    params.inserts[0].type = InsertType::plugin;
+    params.inserts[0].bypassed = false;
+    params.insertTypes[0].store ((int) InsertType::plugin, std::memory_order_release);
+
+    restartDeviceAfterGraphEdit();
+    return {};
+}
+
+void AudioEngine::unloadInsertPlugin (StripKind kind, int stripIndex, int slotIndex)
+{
+    if (auto* strip = findStrip (kind, stripIndex))
+    {
+        stopDeviceForGraphEdit();
+
+        strip->setPluginSlot (slotIndex, nullptr);
+        strip->getParameters().setInsert (slotIndex, InsertType::none);
+
+        restartDeviceAfterGraphEdit();
+    }
+}
+
+void AudioEngine::unloadTrackInstrument (int trackIndex)
+{
+    if (! juce::isPositiveAndBelow (trackIndex, trackCount))
+        return;
+
+    stopDeviceForGraphEdit();
+
+    auto& track = tracks[(size_t) trackIndex];
+    track.strip.setPluginSlot (0, nullptr);
+    track.strip.getParameters().setInsert (0, InsertType::none);
+
+    restartDeviceAfterGraphEdit();
+}
+
+PluginSlot* AudioEngine::getInsertPluginSlot (StripKind kind, int stripIndex, int slotIndex)
+{
+    if (auto* strip = findStrip (kind, stripIndex))
+        return strip->getPluginSlot (slotIndex);
+
+    return nullptr;
+}
+
+PluginSlot* AudioEngine::getTrackInstrumentSlot (int trackIndex)
+{
+    if (! juce::isPositiveAndBelow (trackIndex, trackCount))
+        return nullptr;
+
+    return tracks[(size_t) trackIndex].strip.getPluginSlot (0);
+}
+
+int AudioEngine::getNumLoadedPlugins() const
+{
+    int count = 0;
+
+    for (int i = 0; i < trackCount; ++i)
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+            if (tracks[(size_t) i].strip.getPluginSlot (s) != nullptr)
+                ++count;
+
+    return count;
+}
+
+void AudioEngine::preparePluginsForGraph()
+{
+    for (int i = 0; i < trackCount; ++i)
+        tracks[(size_t) i].strip.preparePlugins (sampleRate, blockSize, 2);
+
+    for (auto& bus : buses)
+        bus.preparePlugins (sampleRate, blockSize, 2);
+
+    masterBus.preparePlugins (sampleRate, blockSize, 2);
+}
+
+void AudioEngine::reloadAllPlugins (juce::StringArray& warnings)
+{
+    warnings.clear();
+
+    if (projectState == nullptr)
+        return;
+
+    stopDeviceForGraphEdit();
+
+    // Tracks: hosted instrument first, then the insert chain.
+    for (int i = 0; i < trackCount; ++i)
+    {
+        auto& strip = tracks[(size_t) i].strip;
+
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+            strip.setPluginSlot (s, nullptr);
+
+        strip.getParameters().clearInserts();
+
+        if (i >= (int) projectState->tracks.size())
+            continue;
+
+        const auto& modelTrack = projectState->tracks[(size_t) i];
+
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+        {
+            const auto& modelSlot = modelTrack.inserts[(size_t) s];
+
+            if (modelSlot.type != InsertType::plugin || ! modelSlot.plugin.isValid())
+                continue;
+
+            const auto error = loadInsertPlugin (StripKind::track, i, s);
+
+            if (error.isNotEmpty())
+                warnings.add (modelTrack.name + " / insert " + juce::String (s + 1) + ": " + error);
+        }
+    }
+
+    for (int i = 0; i < constants::numMixerBuses; ++i)
+    {
+        auto& strip = buses[(size_t) i];
+
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+        {
+            strip.setPluginSlot (s, nullptr);
+            strip.getParameters().setInsert (s, InsertType::none);
+        }
+
+        if (i >= (int) projectState->buses.size())
+            continue;
+
+        const auto& modelBus = projectState->buses[(size_t) i];
+
+        for (int s = 0; s < constants::maxBusInserts; ++s)
+        {
+            const auto& modelSlot = modelBus.inserts[(size_t) s];
+
+            if (modelSlot.type != InsertType::plugin || ! modelSlot.plugin.isValid())
+                continue;
+
+            const auto error = loadInsertPlugin (StripKind::bus, i, s);
+
+            if (error.isNotEmpty())
+                warnings.add (modelBus.name + " / insert " + juce::String (s + 1) + ": " + error);
+        }
+    }
+
+    for (int s = 0; s < constants::maxTrackInserts; ++s)
+    {
+        masterBus.setPluginSlot (s, nullptr);
+        masterBus.getParameters().setInsert (s, InsertType::none);
+    }
+
+    for (int s = 0; s < constants::maxTrackInserts; ++s)
+    {
+        const auto& modelSlot = projectState->master.inserts[(size_t) s];
+
+        if (modelSlot.type != InsertType::plugin || ! modelSlot.plugin.isValid())
+            continue;
+
+        const auto error = loadInsertPlugin (StripKind::master, -1, s);
+
+        if (error.isNotEmpty())
+            warnings.add ("Master / insert " + juce::String (s + 1) + ": " + error);
+    }
+
+    restartDeviceAfterGraphEdit();
+}
+
+void AudioEngine::capturePluginStates()
+{
+    if (projectState == nullptr)
+        return;
+
+    const auto captureSlot = [] (InsertSlot& modelSlot, PluginSlot* liveSlot)
+    {
+        if (modelSlot.type != InsertType::plugin)
+            return;
+
+        if (liveSlot == nullptr || liveSlot->getInstance() == nullptr)
+        {
+            modelSlot.plugin.stateSaved = false;
+            return;
+        }
+
+        juce::MemoryBlock state;
+        liveSlot->getInstance()->getStateInformation (state);
+
+        if (state.getSize() > 0)
+        {
+            modelSlot.pluginStateBase64 = state.toBase64Encoding();
+            modelSlot.plugin.stateSaved = true;
+        }
+        else
+        {
+            modelSlot.pluginStateBase64.clear();
+            modelSlot.plugin.stateSaved = false;
+        }
+    };
+
+    for (int i = 0; i < trackCount && i < (int) projectState->tracks.size(); ++i)
+    {
+        auto& modelTrack = projectState->tracks[(size_t) i];
+        auto& strip = tracks[(size_t) i].strip;
+
+        for (int s = 0; s < constants::maxTrackInserts; ++s)
+            captureSlot (modelTrack.inserts[(size_t) s], strip.getPluginSlot (s));
+    }
+
+    for (int i = 0; i < constants::numMixerBuses; ++i)
+        for (int s = 0; s < constants::maxBusInserts; ++s)
+            captureSlot (projectState->buses[(size_t) i].inserts[(size_t) s],
+                         buses[(size_t) i].getPluginSlot (s));
+
+    for (int s = 0; s < constants::maxTrackInserts; ++s)
+        captureSlot (projectState->master.inserts[(size_t) s], masterBus.getPluginSlot (s));
+}
+
+//==============================================================================
+// Audio input recording
+//==============================================================================
+int AudioEngine::getArmedTrack() const
+{
+    const auto armed = armedTrackIndex.load (std::memory_order_relaxed);
+
+    if (juce::isPositiveAndBelow (armed, trackCount))
+        return armed;
+
+    return -1;
+}
+
+bool AudioEngine::hasAudioInput() const
+{
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+        return device->getActiveInputChannels().countNumberOfSetBits() > 0;
+
+    return false;
+}
+
+juce::String AudioEngine::startInputRecording (const juce::File& mediaFolder)
+{
+    if (inputRecorder.isRecording())
+        return "Already recording.";
+
+    if (! hasAudioInput())
+        return "The audio device has no input channels. Pick an input in the AUDIO settings first.";
+
+    const auto track = getArmedTrack();
+
+    if (track < 0)
+        return "Arm a track for recording first (the R button on the track header).";
+
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
+    const auto file = mediaFolder.getChildFile ("take-" + stamp + ".wav");
+
+    juce::String error;
+
+    if (! inputRecorder.start (file, transport.getPositionSteps(), error))
+        return error;
+
+    transport.setRecording (true);
+    transport.setPlaying (true);
+
+    return {};
+}
+
+AudioEngine::RecordedTake AudioEngine::stopInputRecording()
+{
+    RecordedTake take;
+
+    if (! inputRecorder.isRecording())
+        return take;
+
+    take.file = inputRecorder.getRecordingFile();
+    take.startStep = inputRecorder.getStartPositionSteps();
+    take.lengthSeconds = inputRecorder.getRecordedSeconds();
+    take.trackIndex = getArmedTrack();
+
+    inputRecorder.stop();
+    transport.setRecording (false);
+
+    // A take shorter than a few milliseconds is a mistake, not a recording.
+    if (take.lengthSeconds < 0.05)
+    {
+        take.file.deleteFile();
+        take = RecordedTake {};
+    }
+
+    return take;
 }
 }

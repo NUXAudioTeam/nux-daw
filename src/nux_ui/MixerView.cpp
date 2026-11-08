@@ -1,4 +1,6 @@
 #include "MixerView.h"
+#include "PluginPicker.h"
+#include "../nux_core/InsertParameters.h"
 
 namespace nux
 {
@@ -22,12 +24,19 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
     {
         auto& state = document.getState();
 
-        if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
-            state.tracks[(size_t) index].name = nameLabel.getText();
-        else if (kind == Kind::bus)
-            state.buses[(size_t) index].name = nameLabel.getText();
-        else
+        const auto isTrack = kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size());
+        const auto isBus   = kind == Kind::bus && juce::isPositiveAndBelow (index, constants::numMixerBuses);
+
+        if (! isTrack && ! isBus)
             return;
+
+        // Record the state before renaming, so undo restores the old name.
+        document.beginEdit ("track rename", "Rename a track");
+
+        if (isTrack)
+            state.tracks[(size_t) index].name = nameLabel.getText();
+        else
+            state.buses[(size_t) index].name = nameLabel.getText();
 
         document.markDirty();
 
@@ -45,6 +54,8 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
     {
         auto& state = document.getState();
         const auto value = (float) fader.getValue();
+
+        document.beginEdit ("fader", "Change the volume");
 
         if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
             state.tracks[(size_t) index].volumeDb = value;
@@ -65,6 +76,8 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
     {
         auto& state = document.getState();
 
+        document.beginEdit ("pan", "Change the pan");
+
         if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
             state.tracks[(size_t) index].pan = (float) value;
         else if (kind == Kind::bus)
@@ -78,6 +91,8 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
     {
         auto& state = document.getState();
         const auto muted = muteButton.getToggleState();
+
+        document.beginEdit ("mute", "Toggle mute");
 
         if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
             state.tracks[(size_t) index].muted = muted;
@@ -95,6 +110,8 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
         soloButton.onClick = [this]
         {
             auto& state = document.getState();
+
+            document.beginEdit ("solo", "Toggle solo");
 
             if (juce::isPositiveAndBelow (index, (int) state.tracks.size()))
                 state.tracks[(size_t) index].soloed = soloButton.getToggleState();
@@ -142,9 +159,35 @@ ChannelStripComponent::ChannelStripComponent (ProjectDocument& d, AudioEngine& e
 
     for (int slot = 0; slot < numInserts; ++slot)
     {
-        auto button = std::make_unique<juce::TextButton>();
+        // A small Button subclass so a double-click can open the parameter editor
+        // while a single click still opens the insert menu.
+        struct InsertButton final : public juce::TextButton
+        {
+            std::function<void()> onDoubleClick;
+
+            void mouseDoubleClick (const juce::MouseEvent& e) override
+            {
+                juce::ignoreUnused (e);
+
+                if (onDoubleClick)
+                    onDoubleClick();
+            }
+        };
+
+        auto button = std::make_unique<InsertButton>();
         button->setColour (juce::TextButton::buttonColourId, theme::surface);
-        button->onClick = [this, slot] { showInsertMenu (slot); };
+        button->onClick = [this, slot]
+        {
+            if (onInsertClicked)
+                onInsertClicked (slot);
+            else
+                showInsertMenu (slot);
+        };
+        button->onDoubleClick = [this, slot]
+        {
+            if (onInsertDoubleClicked)
+                onInsertDoubleClicked (slot, getStripDisplayName());
+        };
         addAndMakeVisible (*button);
         insertButtons.push_back (std::move (button));
     }
@@ -212,10 +255,36 @@ void ChannelStripComponent::syncFromState()
     repaint();
 }
 
+juce::String ChannelStripComponent::getStripDisplayName() const
+{
+    if (kind == Kind::master)
+        return "MASTER";
+
+    auto& state = document.getState();
+
+    if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
+        return state.tracks[(size_t) index].name;
+
+    if (kind == Kind::bus && juce::isPositiveAndBelow (index, constants::numMixerBuses))
+        return state.buses[(size_t) index].name;
+
+    return "Channel";
+}
+
 juce::String ChannelStripComponent::describeInsert (const InsertSlot& slot) const
 {
     if (slot.type == InsertType::none)
         return "+ INS";
+
+    if (slot.type == InsertType::plugin)
+    {
+        auto name = slot.plugin.name.isNotEmpty() ? slot.plugin.name : juce::String ("PLUGIN");
+
+        if (name.length() > 12)
+            name = name.substring (0, 11) + juce::String::charToString ((juce::juce_wchar) 0x2026);
+
+        return slot.bypassed ? name + " (off)" : name;
+    }
 
     juce::String name;
 
@@ -236,6 +305,23 @@ void ChannelStripComponent::showInsertMenu (int slotIndex)
 {
     juce::PopupMenu menu;
     menu.addSectionHeader ("Insert " + juce::String (slotIndex + 1));
+    menu.addItem (7, "Plugin...");
+
+    const auto isPluginSlot = [this, slotIndex]
+    {
+        auto& state = document.getState();
+
+        if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
+            return state.tracks[(size_t) index].inserts[(size_t) slotIndex].type == InsertType::plugin;
+
+        if (kind == Kind::bus && juce::isPositiveAndBelow (slotIndex, constants::maxBusInserts))
+            return state.buses[(size_t) index].inserts[(size_t) slotIndex].type == InsertType::plugin;
+
+        return state.master.inserts[(size_t) slotIndex].type == InsertType::plugin;
+    }();
+
+    menu.addItem (8, "Open plugin window", isPluginSlot);
+    menu.addSeparator();
     menu.addItem (1, "Equaliser");
     menu.addItem (2, "Compressor");
     menu.addItem (3, "Delay");
@@ -253,6 +339,8 @@ void ChannelStripComponent::showInsertMenu (int slotIndex)
         auto& state = document.getState();
         InsertSlot* slot = nullptr;
 
+        document.beginEdit ("insert change", "Edit an insert");
+
         if (kind == Kind::track && juce::isPositiveAndBelow (index, (int) state.tracks.size()))
             slot = &state.tracks[(size_t) index].inserts[(size_t) slotIndex];
         else if (kind == Kind::bus && juce::isPositiveAndBelow (slotIndex, constants::maxBusInserts))
@@ -260,14 +348,111 @@ void ChannelStripComponent::showInsertMenu (int slotIndex)
         else
             slot = &state.master.inserts[(size_t) slotIndex];
 
+        if (result == 7)
+        {
+            // Load a plugin into this slot. The description is stored in the project
+            // first, then the engine instantiates it from there, so the model stays
+            // the single source of truth.
+            const auto kindCopy = kind;
+            const auto indexCopy = index;
+            const auto slotCopy = slotIndex;
+            auto* enginePtr = &engine;
+            auto* documentPtr = &document;
+            auto* self = this;
+
+            documentPtr->beginEdit ("insert plugin", "Load a plugin");
+
+            auto* manager = engine.getPluginManager();
+            jassert (manager != nullptr);
+
+            if (manager == nullptr)
+                return;
+
+            showPluginPicker (*manager,
+                              false,
+                              [enginePtr, documentPtr, self, kindCopy, indexCopy, slotCopy]
+                              (const juce::PluginDescription& description)
+            {
+                auto& state = documentPtr->getState();
+                InsertSlot* modelSlot = nullptr;
+
+                if (kindCopy == Kind::track && juce::isPositiveAndBelow (indexCopy, (int) state.tracks.size()))
+                    modelSlot = &state.tracks[(size_t) indexCopy].inserts[(size_t) slotCopy];
+                else if (kindCopy == Kind::bus && juce::isPositiveAndBelow (slotCopy, constants::maxBusInserts))
+                    modelSlot = &state.buses[(size_t) indexCopy].inserts[(size_t) slotCopy];
+                else
+                    modelSlot = &state.master.inserts[(size_t) slotCopy];
+
+                PluginReference reference;
+                reference.name         = description.name;
+                reference.manufacturer = description.manufacturerName;
+                reference.format       = description.pluginFormatName;
+                reference.isInstrument = description.isInstrument;
+
+                if (auto xml = description.createXml())
+                    reference.descriptionXml = xml->toString (juce::XmlElement::TextFormat().singleLine());
+
+                reference.stateSaved = false;
+
+                modelSlot->type = InsertType::plugin;
+                modelSlot->bypassed = false;
+                modelSlot->plugin = reference;
+                modelSlot->pluginStateBase64.clear();
+
+                const auto stripKind = kindCopy == Kind::track ? AudioEngine::StripKind::track
+                                     : kindCopy == Kind::bus   ? AudioEngine::StripKind::bus
+                                                               : AudioEngine::StripKind::master;
+
+                const auto error = enginePtr->loadInsertPlugin (stripKind, indexCopy, slotCopy);
+
+                enginePtr->syncMixerFromState();
+                documentPtr->markDirty();
+                self->syncFromState();
+
+                if (self->onEdited)
+                    self->onEdited();
+
+                if (error.isNotEmpty())
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                            "Could not load " + description.name,
+                                                            error);
+            });
+
+            return;
+        }
+
+        if (result == 8)
+        {
+            const auto stripKind = kind == Kind::track ? AudioEngine::StripKind::track
+                                 : kind == Kind::bus   ? AudioEngine::StripKind::bus
+                                                       : AudioEngine::StripKind::master;
+
+            if (auto* plugin = engine.getInsertPluginSlot (stripKind, index, slotIndex))
+                if (auto* window = PluginEditorWindow::createAndShow (*plugin))
+                    juce::ignoreUnused (window);
+
+            return;
+        }
+
         switch (result)
         {
-            case 1: slot->type = InsertType::eq; slot->bypassed = false; slot->p1 = 0.0f; slot->p2 = 1000.0f; slot->p3 = 0.0f; break;
-            case 2: slot->type = InsertType::compressor; slot->bypassed = false; slot->p1 = -18.0f; slot->p2 = 3.0f; slot->p3 = 12.0f; break;
-            case 3: slot->type = InsertType::delay; slot->bypassed = false; slot->p1 = 350.0f; slot->p2 = 0.35f; slot->p3 = 0.25f; break;
-            case 4: slot->type = InsertType::reverb; slot->bypassed = false; slot->p1 = 0.7f; slot->p2 = 0.45f; slot->p3 = 0.22f; break;
+            // Defaults come from the shared descriptors so the menu, the editor and
+            // the DSP layer can never disagree about what a fresh insert starts at.
+            case 1: applyInsertDefaults (*slot, InsertType::eq);         break;
+            case 2: applyInsertDefaults (*slot, InsertType::compressor); break;
+            case 3: applyInsertDefaults (*slot, InsertType::delay);      break;
+            case 4: applyInsertDefaults (*slot, InsertType::reverb);     break;
             case 5: slot->bypassed = ! slot->bypassed; break;
-            case 6: *slot = InsertSlot {}; break;
+            case 6:
+            {
+                const auto stripKind = kind == Kind::track ? AudioEngine::StripKind::track
+                                     : kind == Kind::bus   ? AudioEngine::StripKind::bus
+                                                           : AudioEngine::StripKind::master;
+
+                engine.unloadInsertPlugin (stripKind, index, slotIndex);
+                *slot = InsertSlot {};
+                break;
+            }
             default: return;
         }
 
@@ -401,6 +586,10 @@ void MixerView::rebuild()
         auto strip = std::make_unique<ChannelStripComponent> (document, engine,
                                                               ChannelStripComponent::Kind::track, i);
         strip->onEdited = [this] { if (onProjectEdited) onProjectEdited(); };
+        strip->onInsertDoubleClicked = [this, i] (int slotIndex, juce::String stripName)
+        {
+            showInsertEditor (ChannelStripComponent::Kind::track, i, slotIndex, stripName);
+        };
         stripHolder.addAndMakeVisible (*strip);
         strips.push_back (std::move (strip));
     }
@@ -410,6 +599,10 @@ void MixerView::rebuild()
         auto strip = std::make_unique<ChannelStripComponent> (document, engine,
                                                               ChannelStripComponent::Kind::bus, i);
         strip->onEdited = [this] { if (onProjectEdited) onProjectEdited(); };
+        strip->onInsertDoubleClicked = [this, i] (int slotIndex, juce::String stripName)
+        {
+            showInsertEditor (ChannelStripComponent::Kind::bus, i, slotIndex, stripName);
+        };
         stripHolder.addAndMakeVisible (*strip);
         strips.push_back (std::move (strip));
     }
@@ -417,6 +610,10 @@ void MixerView::rebuild()
     auto master = std::make_unique<ChannelStripComponent> (document, engine,
                                                            ChannelStripComponent::Kind::master, 0);
     master->onEdited = [this] { if (onProjectEdited) onProjectEdited(); };
+    master->onInsertDoubleClicked = [this] (int slotIndex, juce::String stripName)
+    {
+        showInsertEditor (ChannelStripComponent::Kind::master, 0, slotIndex, stripName);
+    };
     stripHolder.addAndMakeVisible (*master);
     strips.push_back (std::move (master));
 
@@ -442,12 +639,46 @@ void MixerView::resized()
 
     for (size_t i = 0; i < strips.size(); ++i)
         strips[i]->setBounds (4 + (int) i * stripWidth, 4, stripWidth - 4, stripHeight - 8);
+
+    if (insertEditor != nullptr)
+    {
+        // Floats over the lower right of the mixer, above the strips but inside the view.
+        const auto width = juce::jmin (300, juce::jmax (220, area.getWidth() / 3));
+        const auto height = juce::jmin (190, juce::jmax (150, area.getHeight() / 2));
+
+        insertEditor->setBounds (area.getRight() - width - 12,
+                                 area.getBottom() - height - 12,
+                                 width, height);
+        insertEditor->toFront (false);
+    }
 }
 
 void MixerView::timerCallback()
 {
     for (auto& strip : strips)
         strip->refreshLevels();
+
+    // If the edited insert changed type (a plugin loaded, the slot cleared, an undo)
+    // the editor has to follow, otherwise its knobs describe the wrong effect.
+    if (insertEditor != nullptr)
+    {
+        auto& state = document.getState();
+        const InsertSlot* slot = nullptr;
+
+        if (editorKind == ChannelStripComponent::Kind::track
+            && juce::isPositiveAndBelow (editorStripIndex, (int) state.tracks.size()))
+            slot = &state.tracks[(size_t) editorStripIndex].inserts[(size_t) editorSlotIndex];
+        else if (editorKind == ChannelStripComponent::Kind::bus
+                 && juce::isPositiveAndBelow (editorSlotIndex, constants::maxBusInserts))
+            slot = &state.buses[(size_t) editorStripIndex].inserts[(size_t) editorSlotIndex];
+        else
+            slot = &state.master.inserts[(size_t) editorSlotIndex];
+
+        // refreshFromState() is cheap when nothing changed: it only rebuilds the
+        // controls when the effect type or the knob count differs.
+        insertEditor->refreshFromState();
+        juce::ignoreUnused (slot);
+    }
 }
 
 void MixerView::paint (juce::Graphics& g)
@@ -457,5 +688,53 @@ void MixerView::paint (juce::Graphics& g)
 
     g.setColour (theme::panel);
     g.fillRect (getLocalBounds().removeFromTop (26));
+}
+
+//==============================================================================
+void MixerView::showInsertEditor (ChannelStripComponent::Kind kind, int stripIndex, int slotIndex,
+                                  const juce::String& stripName)
+{
+    const auto engineKind = kind == ChannelStripComponent::Kind::track ? AudioEngine::StripKind::track
+                          : kind == ChannelStripComponent::Kind::bus   ? AudioEngine::StripKind::bus
+                                                                       : AudioEngine::StripKind::master;
+
+    InsertEditorPanel::Target target;
+    target.kind = engineKind;
+    target.stripIndex = stripIndex;
+    target.slotIndex = slotIndex;
+    target.stripName = stripName;
+
+    editorKind = kind;
+    editorStripIndex = stripIndex;
+    editorSlotIndex = slotIndex;
+
+    insertEditor = std::make_unique<InsertEditorPanel> (document, engine, target);
+    insertEditor->onEdited = [this] { if (onProjectEdited) onProjectEdited(); };
+    addAndMakeVisible (*insertEditor);
+
+    resized();
+    repaint();
+}
+
+void MixerView::hideInsertEditor()
+{
+    insertEditor.reset();
+    editorSlotIndex = -1;
+    resized();
+    repaint();
+}
+
+ChannelStripComponent* MixerView::getEditorSourceStrip() const
+{
+    if (editorSlotIndex < 0)
+        return nullptr;
+
+    const auto isTrack = editorKind == ChannelStripComponent::Kind::track;
+    const auto wanted = isTrack ? editorStripIndex : editorStripIndex + (int) document.getState().tracks.size();
+
+    if (! juce::isPositiveAndBelow (wanted, (int) strips.size()))
+        return nullptr;
+
+    return strips[(size_t) wanted].get();
 }
 }

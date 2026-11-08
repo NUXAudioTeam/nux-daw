@@ -7,12 +7,24 @@ target_sources(NUXTests PRIVATE
     DspTests.cpp
     AudioClipTests.cpp
     EngineRenderTests.cpp
+    PluginHostTests.cpp
+    InsertParameterTests.cpp
+    UndoTests.cpp
+    RecordingTests.cpp
+    AudioDeviceTests.cpp
+    ../src/nux_core/ProjectDocument.cpp
     ../src/nux_core/ProjectSerializer.cpp
+    ../src/nux_core/InsertParameters.cpp
+    ../src/nux_core/UndoHistory.cpp
     ../src/nux_core/TrackModel.cpp
     ../src/nux_engine/AudioClipPlayer.cpp
     ../src/nux_engine/AudioClipStore.cpp
+    ../src/nux_engine/InputRecorder.cpp
     ../src/nux_engine/AudioEngine.cpp
     ../src/nux_engine/ChannelStrip.cpp
+    ../src/nux_engine/PluginManager.cpp
+    ../src/nux_engine/PluginSlot.cpp
+    ../src/nux_engine/PluginRetirementQueue.cpp
     ../src/nux_engine/Synth.cpp)
 
 target_include_directories(NUXTests PRIVATE ../src)
@@ -22,7 +34,8 @@ target_compile_definitions(NUXTests PRIVATE
     JUCE_USE_CURL=0
     JUCE_STANDALONE_APPLICATION=1
     JUCE_UNIT_TESTS=1
-    JUCE_MODAL_LOOPS_PERMITTED=1)
+    JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_PLUGINHOST_VST3=1)
 
 target_link_libraries(NUXTests PRIVATE
     juce::juce_audio_basics
@@ -37,3 +50,54 @@ target_link_libraries(NUXTests PRIVATE
     juce::juce_recommended_warning_flags)
 
 add_test(NAME NUXTests COMMAND NUXTests)
+
+# ==============================================================================
+# Test plugins: real VST3 binaries built from JUCE, used to verify that NUX can
+# host a plugin and that its audio reaches the mix. They are only built when the
+# test suite is enabled, so the shipped application never depends on them.
+# ==============================================================================
+option(NUX_BUILD_TEST_PLUGINS "Build the VST3 test plugins used by the host tests" ON)
+
+if (NUX_BUILD_TEST_PLUGINS)
+    juce_add_plugin(NUXTestGain
+        COMPANY_NAME "NUX"
+        PLUGIN_MANUFACTURER_CODE Nuxu
+        PLUGIN_CODE NxGn
+        FORMATS VST3
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT FALSE
+        NEEDS_MIDI_OUTPUT FALSE
+        IS_MIDI_EFFECT FALSE
+        EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+        COPY_PLUGIN_AFTER_BUILD FALSE
+        PLUGIN_NAME "NUX Test Gain"
+        PRODUCT_NAME "NUX Test Gain")
+
+    target_sources(NUXTestGain PRIVATE testplugins/GainTestPlugin.cpp)
+    target_include_directories(NUXTestGain PRIVATE testplugins)
+    target_compile_definitions(NUXTestGain PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0)
+
+    juce_add_plugin(NUXTestTone
+        COMPANY_NAME "NUX"
+        PLUGIN_MANUFACTURER_CODE Nuxu
+        PLUGIN_CODE NxTn
+        FORMATS VST3
+        IS_SYNTH TRUE
+        NEEDS_MIDI_INPUT TRUE
+        NEEDS_MIDI_OUTPUT FALSE
+        IS_MIDI_EFFECT FALSE
+        EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+        COPY_PLUGIN_AFTER_BUILD FALSE
+        PLUGIN_NAME "NUX Test Tone"
+        PRODUCT_NAME "NUX Test Tone")
+
+    target_sources(NUXTestTone PRIVATE testplugins/ToneTestInstrument.cpp)
+    target_include_directories(NUXTestTone PRIVATE testplugins)
+    target_compile_definitions(NUXTestTone PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0)
+endif()

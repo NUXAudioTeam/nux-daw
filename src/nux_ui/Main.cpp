@@ -3,6 +3,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "MainComponent.h"
+
+#include <iostream>
 #include "Theme.h"
 
 namespace nux
@@ -34,6 +36,14 @@ public:
         return dynamic_cast<MainComponent*> (getContentComponent());
     }
 
+    juce::Component* getAudioSettingsWindow() const
+    {
+        if (auto* main = getMainComponent())
+            return main->getAudioSettingsComponentForDemo();
+
+        return nullptr;
+    }
+
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NuxMainWindow)
 };
@@ -57,24 +67,129 @@ public:
         // GUI verifiable in CI environments that have no interactive display.
         const auto args = juce::StringArray::fromTokens (commandLine, true);
 
-        if (args.contains ("--demo-clip"))
+        // Headless runs report through stderr as well as the JUCE logger, because the
+        // logger may not be installed in a batch environment.
+        const auto report = [] (const juce::String& text)
+        {
+            juce::Logger::writeToLog (text);
+            std::cerr << text << std::endl;
+        };
+
+        const auto wantsDemo = args.contains ("--demo-clip")
+                            || args.contains ("--plugin")
+                            || args.contains ("--insert-editor")
+                            || args.contains ("--undo-self-test")
+                            || args.contains ("--record-self-test")
+                            || args.contains ("--instrument-self-test")
+                            || args.contains ("--audio-settings");
+
+        if (wantsDemo)
         {
             const auto fileIndex = args.indexOf ("--demo-clip") + 1;
 
-            if (fileIndex < args.size() && mainWindow != nullptr)
+            if (fileIndex > 0 && fileIndex < args.size() && mainWindow != nullptr)
                 if (auto* main = mainWindow->getMainComponent())
                     main->loadDemoProjectWithAudioClip (resolvePath (args[fileIndex]));
 
+            const auto pluginIndex = args.indexOf ("--plugin");
+
+            if (pluginIndex >= 0 && pluginIndex + 2 < args.size() && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                {
+                    const auto message = main->loadPluginIntoDemoTrack (0,
+                                                                        resolvePath (args[pluginIndex + 1]),
+                                                                        args[pluginIndex + 2].unquoted());
+                    report ("Plugin load: " + message);
+                }
+            }
+
+            const auto editorIndex = args.indexOf ("--insert-editor");
+
+            if (editorIndex >= 0 && editorIndex + 1 < args.size() && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                {
+                    const auto message = main->showInsertEditorForDemo (args[editorIndex + 1], 0, 0);
+                    report ("Insert editor: " + message);
+
+                    const auto paramIndex = args.indexOf ("--param");
+
+                    if (paramIndex >= 0 && paramIndex + 2 < args.size())
+                    {
+                        const auto index = args[paramIndex + 1].getIntValue();
+                        const auto value = args[paramIndex + 2].getDoubleValue();
+                        const auto applied = main->setDemoInsertParameter (index, value);
+                        report ("Insert parameter " + juce::String (index)
+                            + " = " + juce::String (value)
+                            + (applied ? " applied" : " FAILED"));
+                    }
+                }
+            }
+
+            if (args.contains ("--audio-settings") && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                {
+                    main->showAudioSettingsForDemo (args.contains ("--test-tone"));
+                    report ("Audio settings: " + juce::String (args.contains ("--test-tone")
+                                                                 ? "test tone on" : "opened"));
+                }
+            }
+
+            const auto recordIndex = args.indexOf ("--record-self-test");
+
+            if (recordIndex >= 0 && recordIndex + 2 < args.size() && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                {
+                    const auto message = main->runRecordingSelfTest (resolvePath (args[recordIndex + 1].unquoted()),
+                                                                     args[recordIndex + 2].getDoubleValue(),
+                                                                     0);
+                    report ("RECORD SELF TEST:\n" + message);
+                }
+            }
+
+            const auto instrumentIndex = args.indexOf ("--instrument-self-test");
+
+            if (instrumentIndex >= 0 && instrumentIndex + 2 < args.size() && mainWindow != nullptr)
+            {
+                if (auto* main = mainWindow->getMainComponent())
+                {
+                    report ("INSTRUMENT SELF TEST:\n"
+                              + main->runInstrumentSelfTest (resolvePath (args[instrumentIndex + 1].unquoted()),
+                                                             args[instrumentIndex + 2].unquoted(),
+                                                             1));
+                }
+            }
+
+            if (args.contains ("--undo-self-test") && mainWindow != nullptr)
+                if (auto* main = mainWindow->getMainComponent())
+                    report ("UNDO SELF TEST:\n" + main->runUndoSelfTest());
+
             const auto shotIndex = args.indexOf ("--screenshot");
 
-            if (shotIndex > 0 && shotIndex + 1 < args.size())
+            if (shotIndex >= 0 && shotIndex + 1 < args.size())
             {
                 const auto path = args[shotIndex + 1];
+                const auto shootAudioSettings = args.contains ("--audio-settings");
 
-                juce::Timer::callAfterDelay (2500, [this, path]
+                juce::Timer::callAfterDelay (2500, [this, path, shootAudioSettings]
                 {
                     if (mainWindow != nullptr)
-                        writeWindowScreenshot (*mainWindow, resolvePath (path));
+                        // When the audio settings window is on screen it is the subject,
+                        // not the main window behind it.
+                        if (shootAudioSettings)
+                        {
+                            if (auto* dialog = mainWindow->getAudioSettingsWindow())
+                                writeWindowScreenshot (*dialog, resolvePath (path));
+                            else
+                                writeWindowScreenshot (*mainWindow, resolvePath (path));
+                        }
+                        else
+                        {
+                            writeWindowScreenshot (*mainWindow, resolvePath (path));
+                        }
 
                     juce::JUCEApplication::quit();
                 });

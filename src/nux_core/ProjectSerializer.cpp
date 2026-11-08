@@ -4,6 +4,8 @@ namespace nux::serializer
 {
 namespace
 {
+bool getBool (const juce::var& v, bool fallback);
+
 const char* trackTypeToString (TrackType t) { return t == TrackType::audio ? "audio" : "sampler"; }
 TrackType trackTypeFromString (const juce::String& s) { return s == "audio" ? TrackType::audio : TrackType::sampler; }
 
@@ -15,6 +17,7 @@ const char* insertTypeToString (InsertType t)
         case InsertType::compressor: return "compressor";
         case InsertType::delay:      return "delay";
         case InsertType::reverb:     return "reverb";
+        case InsertType::plugin:     return "plugin";
         case InsertType::none:
         default:                     return "none";
     }
@@ -26,7 +29,40 @@ InsertType insertTypeFromString (const juce::String& s)
     if (s == "compressor") return InsertType::compressor;
     if (s == "delay")      return InsertType::delay;
     if (s == "reverb")     return InsertType::reverb;
+    if (s == "plugin")     return InsertType::plugin;
     return InsertType::none;
+}
+
+juce::var pluginReferenceToVar (const PluginReference& ref)
+{
+    if (! ref.isValid())
+        return {};
+
+    auto* obj = new juce::DynamicObject();
+    obj->setProperty ("description", ref.descriptionXml);
+    obj->setProperty ("name", ref.name);
+    obj->setProperty ("manufacturer", ref.manufacturer);
+    obj->setProperty ("format", ref.format);
+    obj->setProperty ("isInstrument", ref.isInstrument);
+    obj->setProperty ("stateSaved", ref.stateSaved);
+    return juce::var (obj);
+}
+
+PluginReference pluginReferenceFromVar (const juce::var& v)
+{
+    PluginReference ref;
+
+    if (auto* obj = v.getDynamicObject())
+    {
+        ref.descriptionXml = obj->getProperty ("description").toString();
+        ref.name           = obj->getProperty ("name").toString();
+        ref.manufacturer   = obj->getProperty ("manufacturer").toString();
+        ref.format         = obj->getProperty ("format").toString();
+        ref.isInstrument   = getBool (obj->getProperty ("isInstrument"), false);
+        ref.stateSaved     = getBool (obj->getProperty ("stateSaved"), false);
+    }
+
+    return ref;
 }
 
 juce::var insertToVar (const InsertSlot& slot)
@@ -40,6 +76,15 @@ juce::var insertToVar (const InsertSlot& slot)
     obj->setProperty ("p1", slot.p1);
     obj->setProperty ("p2", slot.p2);
     obj->setProperty ("p3", slot.p3);
+
+    if (slot.type == InsertType::plugin)
+    {
+        obj->setProperty ("plugin", pluginReferenceToVar (slot.plugin));
+
+        if (slot.pluginStateBase64.isNotEmpty())
+            obj->setProperty ("pluginState", slot.pluginStateBase64);
+    }
+
     return juce::var (obj);
 }
 
@@ -53,6 +98,8 @@ InsertSlot insertFromVar (const juce::var& v)
         slot.p1       = (float) (double) obj->getProperty ("p1");
         slot.p2       = (float) (double) obj->getProperty ("p2");
         slot.p3       = (float) (double) obj->getProperty ("p3");
+        slot.plugin   = pluginReferenceFromVar (obj->getProperty ("plugin"));
+        slot.pluginStateBase64 = obj->getProperty ("pluginState").toString();
     }
     return slot;
 }
@@ -182,6 +229,14 @@ juce::var trackToVar (const TrackState& t)
     obj->setProperty ("preset", t.instrumentPreset);
     obj->setProperty ("inserts", insertChainToVar (t.inserts));
 
+    if (t.instrumentPlugin.isValid())
+    {
+        obj->setProperty ("instrumentPlugin", pluginReferenceToVar (t.instrumentPlugin));
+
+        if (t.instrumentStateBase64.isNotEmpty())
+            obj->setProperty ("instrumentState", t.instrumentStateBase64);
+    }
+
     juce::Array<juce::var> steps;
     for (int i = 0; i < t.numSteps; ++i)
     {
@@ -229,6 +284,8 @@ TrackState trackFromVar (const juce::var& v)
         t.instrumentPreset = juce::jlimit (0, 7, getInt (obj->getProperty ("preset"), 0));
 
         insertChainFromVar (obj->getProperty ("inserts"), t.inserts);
+        t.instrumentPlugin = pluginReferenceFromVar (obj->getProperty ("instrumentPlugin"));
+        t.instrumentStateBase64 = obj->getProperty ("instrumentState").toString();
 
         t.numSteps = juce::jlimit (constants::minNumSteps, constants::maxNumSteps,
                                    getInt (obj->getProperty ("numSteps"), constants::defaultNumSteps));

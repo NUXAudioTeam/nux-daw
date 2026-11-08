@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Added
+- **Test tone.** A 440 Hz sine that proves audio reaches the selected output device.
+  It is generated on the audio thread with a 5 ms per-sample ramp (no click), added
+  after the master chain so it is audible even with every track muted, capped well
+  below 0 dBFS, and stopped by panic.
+- **Input and output level meters** in the audio settings panel, fed by atomics the
+  engine publishes each block. An input that never moves says "no input signal"
+  instead of looking like a working meter.
+- **Device-loss recovery.** `audioDeviceStopped()` / `audioDeviceError()` now mark the
+  engine honestly, the status line says "Device disconnected - reopening...", and
+  `tryReopenDevice()` reopens and re-prepares the graph from the panel's timer.
+- `--audio-settings [--test-tone]` headless hook, plus the panel screenshot.
+- `tests/AudioDeviceTests.cpp` (6 groups): tone frequency, no clipping, click-free
+  ramp, tone in the mix, meter behaviour, device-loss reporting.
+
+### Fixed
+- The audio settings panel still asked for **0 input channels**, so the selector could
+  never offer an input to record from.
+- `setTestToneEnabled()` clamped the level *up* to 0.05 and then decided it was already
+  audible, so the tone came out at -35 dB instead of the intended level.
+
 # Changelog
 
 All notable changes to NUX DAW are documented here.
@@ -7,6 +30,36 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Edit effect parameters.** Double-click an insert in the mixer to open a panel
+  with the slot's real parameters (EQ low/mid/high, compressor threshold/ratio/
+  attack, delay time/feedback/mix, reverb size/damping/mix), with units, correct
+  ranges, logarithmic frequency and a reset-to-defaults button. The descriptors
+  live in `nux_core/InsertParameters` and are shared by the editor, the insert menu
+  and the tests, so nothing can drift out of step with the DSP.
+- **Undo / redo.** `Ctrl+Z` and `Ctrl+Y` (or `Ctrl+Shift+Z`) undo and redo every
+  edit: steps, notes, clips, faders, pans, mutes, inserts, plugin loads, tempo,
+  pattern length, track add/duplicate/delete and renames. Repeated edits of the same
+  thing (dragging a knob) coalesce into one step. Undo restores the whole project,
+  then rebuilds the audio graph, the clips and the plugin instances to match.
+- Headless self-test for undo/redo (`--undo-self-test`) that drives the real
+  commands and prints what each step did.
+- **VST3 plugins now run in the audio path.** An insert slot can hold a hosted
+  plugin instead of a built-in effect, and a track can be played by a hosted
+  instrument instead of the sampler.
+  - `PluginSlot` owns a live instance, prepares it for the engine's sample rate
+    and block size, and processes it inside the channel strip.
+  - Instruments make the strip generate its own input, so the dry track signal is
+    never mixed in underneath them.
+  - Plugin state (the full chunk) is captured into the project on save and
+    restored on load, so a project reopens with the same plugin settings.
+  - Mixer insert menu: *Plugin...* opens a searchable chooser, *Open plugin
+    window* shows the plugin's own editor.
+  - A plugin that cannot be found reports a message and leaves the rest of the
+    project playing rather than breaking the session.
+- `PluginManager::scanNow()` and explicit extra search folders, so a plugin can be
+  scanned synchronously (used by the chooser's Rescan button and by the tests).
+- Two real VST3 test plugins (`NUX Test Gain`, `NUX Test Tone`) built from JUCE and
+  used by the test suite to verify hosting against actual plugin binaries.
 - **Audio clip playback.** Audio clips are decoded into cached stereo sample
   buffers and streamed in sync with the transport, including looped retriggering.
 - **Audio import**: drag and drop a WAV/AIFF/FLAC/Ogg/MP3 file onto a track lane,
@@ -21,6 +74,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - GitHub Actions CI for Windows (MSVC) and Linux (GCC).
 
 ### Fixed
+- Plugin instances are never destroyed while an audio block could still be using
+  them: they are swapped out with the device stopped and then freed through a
+  short grace-period retirement queue.
 - WAV export no longer applies live looping, so the render tail is silent instead
   of repeating the pattern.
 - Loop retriggering of audio clips: a clip that starts at step 0 now plays again
@@ -47,6 +103,36 @@ First working foundation. **Not a finished DAW** - see `TODO-LIST.md` for the
 honest list of what is still missing.
 
 ### Added
+- **Edit effect parameters.** Double-click an insert in the mixer to open a panel
+  with the slot's real parameters (EQ low/mid/high, compressor threshold/ratio/
+  attack, delay time/feedback/mix, reverb size/damping/mix), with units, correct
+  ranges, logarithmic frequency and a reset-to-defaults button. The descriptors
+  live in `nux_core/InsertParameters` and are shared by the editor, the insert menu
+  and the tests, so nothing can drift out of step with the DSP.
+- **Undo / redo.** `Ctrl+Z` and `Ctrl+Y` (or `Ctrl+Shift+Z`) undo and redo every
+  edit: steps, notes, clips, faders, pans, mutes, inserts, plugin loads, tempo,
+  pattern length, track add/duplicate/delete and renames. Repeated edits of the same
+  thing (dragging a knob) coalesce into one step. Undo restores the whole project,
+  then rebuilds the audio graph, the clips and the plugin instances to match.
+- Headless self-test for undo/redo (`--undo-self-test`) that drives the real
+  commands and prints what each step did.
+- **VST3 plugins now run in the audio path.** An insert slot can hold a hosted
+  plugin instead of a built-in effect, and a track can be played by a hosted
+  instrument instead of the sampler.
+  - `PluginSlot` owns a live instance, prepares it for the engine's sample rate
+    and block size, and processes it inside the channel strip.
+  - Instruments make the strip generate its own input, so the dry track signal is
+    never mixed in underneath them.
+  - Plugin state (the full chunk) is captured into the project on save and
+    restored on load, so a project reopens with the same plugin settings.
+  - Mixer insert menu: *Plugin...* opens a searchable chooser, *Open plugin
+    window* shows the plugin's own editor.
+  - A plugin that cannot be found reports a message and leaves the rest of the
+    project playing rather than breaking the session.
+- `PluginManager::scanNow()` and explicit extra search folders, so a plugin can be
+  scanned synchronously (used by the chooser's Rescan button and by the tests).
+- Two real VST3 test plugins (`NUX Test Gain`, `NUX Test Tone`) built from JUCE and
+  used by the test suite to verify hosting against actual plugin binaries.
 - JUCE 9.0.5 (pinned submodule) + CMake build targeting Visual Studio 2022.
 - Audio engine: device management (WASAPI / DirectSound / ASIO where installed),
   stereo output, MIDI input, block-based rendering with per-track MIDI.

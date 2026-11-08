@@ -54,7 +54,9 @@ TransportBar::TransportBar (AudioEngine& e) : engine (e)
 
     recordButton.onClick = [this]
     {
-        if (engine.getTransport().isRecording())
+        if (onRecordToggled)
+            onRecordToggled();
+        else if (engine.getTransport().isRecording())
             engine.stopRecording();
         else
             engine.startRecording();

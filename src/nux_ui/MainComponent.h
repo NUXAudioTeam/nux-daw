@@ -57,6 +57,39 @@ public:
 
     /** Builds a demo project that contains an audio clip. Used by the smoke test. */
     void loadDemoProjectWithAudioClip (const juce::File& audioFile);
+
+    /** Loads a plugin into a track's first insert slot and reports the result.
+        Used by the headless smoke test and by any future command line tooling. */
+    juce::String loadPluginIntoDemoTrack (int trackIndex, const juce::File& pluginFolder,
+                                          const juce::String& pluginName);
+
+    /** Opens the mixer with the parameter editor showing one insert, and reports
+        what the editor found there. Used by the headless smoke test. */
+    juce::String showInsertEditorForDemo (const juce::String& effectName, int trackIndex, int slotIndex);
+
+    /** Changes one parameter of the insert currently shown in the editor. */
+    bool setDemoInsertParameter (int parameterIndex, double value);
+
+    /** Headless self-test of the undo system through the real UI commands: makes an
+        edit, undoes it, redoes it, and reports what happened at each step. */
+    juce::String runUndoSelfTest();
+
+    /** Headless self-test of recording: places a take on an armed track through the
+        same code path the record button uses, and reports the result. */
+    juce::String runRecordingSelfTest (const juce::File& takeFile, double lengthSeconds, int trackIndex);
+
+    /** Headless self-test of hosted-instrument selection: writes a plugin reference into
+        a track the same way the track menu does, loads it, plays a note through it and
+        checks that the plugin really produced audio. */
+    juce::String runInstrumentSelfTest (const juce::File& pluginFolder, const juce::String& pluginName,
+                                        int trackIndex);
+
+    /** Opens the audio settings window for a screenshot / smoke test. */
+    void showAudioSettingsForDemo (bool startTestTone);
+
+    /** The audio settings panel, when the window is open. */
+    juce::Component* getAudioSettingsComponentForDemo() const;
+
     void toggleAudioSettings();
     void showAbout();
 
@@ -75,6 +108,17 @@ public:
 private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
+    void chooseInstrumentPlugin (int trackIndex);
+    void useBuiltInInstrument (int trackIndex);
+
+    void toggleRecording();
+    void placeRecordedTake (const AudioEngine::RecordedTake& take);
+    static bool fileIsInsideFolder (const juce::File& file, const juce::File& folder);
+
+    void performUndo();
+    void performRedo();
+    void rebuildEverythingAfterHistoryJump (const juce::String& description);
     void handleAsyncUpdate() override;
     void setWorkspace (Workspace workspace);
     void updateWindowTitle();

@@ -49,6 +49,17 @@ public:
     /** Loads the cached list, or starts a first scan if the cache is missing. */
     void loadCachedList();
 
+    /** Scans the given folders right now and blocks until the scan finishes.
+        Used by the tests and by the 'rescan' button, which wants a completion point.
+        Returns the number of plugins found. */
+    int scanNow (const juce::FileSearchPath& folders, juce::StringArray& errors);
+
+    /** Adds folders to the scan list and starts a background scan. */
+    void addSearchPaths (const juce::FileSearchPath& folders);
+
+    /** The folders this manager will scan (user folders plus anything added). */
+    const juce::FileSearchPath& getAdditionalSearchPaths() const noexcept { return extraSearchPaths; }
+
     /** Builds a live instance for a plugin, on the message thread. */
     std::unique_ptr<juce::AudioPluginInstance> createInstance (const juce::PluginDescription& description,
                                                               double sampleRate, int blockSize,
@@ -65,6 +76,7 @@ private:
 
     juce::AudioPluginFormatManager formatManager;
     juce::KnownPluginList knownList;
+    juce::FileSearchPath extraSearchPaths;
     std::vector<PluginInfo> plugins;
 
     std::atomic<bool> scanning { false };

@@ -31,12 +31,13 @@
 |---|---|---|---|
 | 2.1 | **Audio clip playback** | ✅ **[PR #2](https://github.com/hirushanethsara323-jpg/nux-daw/pull/2)** — decode + cache, transport sync, loop retrigger, drag-and-drop import, waveform lane | ඉතුරු: real peak cache, trim/split/move |
 | 2.2 | **Audio recording** | `startRecordingToFile()` engine එකේ තියෙනවා, නමුත් UI එකේ button එකකට **wire කරලා නැහැ** | Record button එක + input channel + latency compensation |
-| 2.3 | **VST3 plugin එක signal path එකට** | Scan කරනවා ✅, editor එක open වෙනවා ✅. නමුත් plugin එකේ **audio processing එක signal chain එකට වැටෙන්නේ නැහැ** | `AudioPluginInstance` එක `InsertProcessor` එකකට wrap කරලා process කරන්න |
-| 2.4 | **VST3 instrument track** | Instrument plugins load වෙනවා, නමුත් built-in synth එක විතරයි note ලබාගන්නේ | Plugin instrument එකකට MIDI route කරන්න |
+| 2.3 | **VST3 plugin එක signal path එකට** | ✅ **හදලා ඉවරයි** — `PluginSlot` එකක් insert slot එකක process කරනවා, state එක project එකේ save/load වෙනවා, editor window + plugin chooser තියෙනවා. Real VST3 දෙකක් එක්ක test කරලා ✅ | ඉතුරු: plugin කිහිපයක් එකම track එකේ chain කිරීමේ UI |
+| 2.4 | **VST3 instrument track** | ✅ **හදලා ඉවරයි** — hosted instrument එකකට sequencer MIDI යනවා, dry signal එක suppress වෙනවා. Test කරලා ✅ | ඉතුරු: track header එකෙන් instrument එක තෝරන UI menu එක (දැන් engine API එකෙන් විතරයි) |
+| 2.9 | **Undo / Redo** | ✅ **හදලා ඉවරයි** — `Ctrl+Z` / `Ctrl+Y`, හැම edit එකක්ම (steps, notes, clips, faders, inserts, plugins, tempo, tracks, renames). Same edit එකක් drag කරද්දී එක step එකක් විතරයි (coalescing) | ඉතුරු: mixer value එකක් drag කරලා *පස්සේ* තව edit එකක් කළොත් step දෙකක් වෙන්න පුළුවන් (450 ms window) |
 | 2.5 | **Piano roll velocity knob** | UI එකේ තියෙනවා, `ignoreUnused` කරලා තියෙන්නේ | Note එකක් draw කරද්දී ඒ value එක use කරන්න + note එකේ velocity edit කරන්න |
 | 2.6 | **Octave +/- buttons** | `octaveOffset` විතරයි වෙනස් වෙන්නේ, canvas එකේ view එක scroll වෙන්නේ නැහැ | `setLowestNote()` එකට hook කරන්න |
 | 2.7 | **Pattern clips (multi-clip)** | Model එකේ `Clip` array එකක් තියෙනවා, නමුත් UI එකේ **එකම clip එක** විතරයි edit වෙන්නේ | Timeline එකේ clip blocks, add/delete/move |
-| 2.8 | **Insert parameter editing** | Insert එකක් add කරන්න පුළුවන්, නමුත් **knob එකකින් value වෙනස් කරන්න බැහැ** | Insert එක click කරද්දී parameter panel එකක් |
+| 2.8 | **Insert parameter editing** | ✅ **හදලා ඉවරයි** — insert එක double-click කළාම knobs වලින් parameters edit කරන්න පුළුවන් (units, ranges, log frequency, reset). Descriptors `nux_core/InsertParameters` එකේ | ඉතුරු: plugin parameters සඳහා generic knobs |
 | 2.9 | **Track reorder / delete UI** | Right-click menu එකේ තියෙනවා, නමුත් drag-to-reorder නැහැ | Drag & drop track ordering |
 | 2.10 | **Loop length vs pattern length** | `patternLengthSteps` විතරයි; song mode එකක් නැහැ | Arrangement/song mode (9 වෙනි කොටස බලන්න) |
 
@@ -96,7 +97,7 @@
 ## 📋 මගේ නිර්දේශිත අනුපිළිවෙල
 
 **පියවර 1 (අද):** 1.1 – 1.7 → clean repo, PR, CI, Windows verify, docs
-**පියවර 2:** 2.1, 2.3, 2.8 → **audio clips + VST3 in signal path + insert params** (මේ තුන නැතුව DAW එකක් "DAW" වෙන්නේ නැහැ)
+**පියවර 2:** 2.1 ✅ audio clips, 2.3 ✅ VST3 in signal path, 2.4 ✅ VST3 instruments — **ඉවරයි**. ඊළඟට 2.8 (insert params UI) සහ 2.5 (undo/redo)
 **පියවර 3:** 5.4, 3.1 → ValueTree + Undo (මේක පස්සේ කරන්න බැහැ, එහෙම නොකළොත් හැම feature එකක්ම දෙපාරක් ලියන්න වෙනවා)
 **පියවර 4:** 2.2, 3.2–3.8 → recording + MIDI editing
 **පියවර 5:** 4.x → pro features

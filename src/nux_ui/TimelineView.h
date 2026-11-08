@@ -91,6 +91,8 @@ public:
     std::function<void()> onProjectEdited;
     std::function<void()> onPreviewNote;
     std::function<void (const juce::File&, int)> onAudioFileDropped;
+    std::function<void (int)> onInstrumentPluginRequested;   // track
+    std::function<void (int)> onClearInstrumentPlugin;       // track
 
 private:
     void timerCallback() override;

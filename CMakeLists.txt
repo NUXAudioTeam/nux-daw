@@ -53,18 +53,25 @@ target_sources(NUX PRIVATE
     src/nux_ui/MixerView.cpp
     src/nux_ui/PianoRollView.cpp
     src/nux_ui/PluginPanel.cpp
+    src/nux_ui/PluginPicker.cpp
+    src/nux_ui/InsertEditorPanel.cpp
     src/nux_ui/AudioSettingsPanel.cpp
     src/nux_ui/TransportBar.cpp
     src/nux_ui/Widgets.cpp
     src/nux_ui/Theme.cpp
     src/nux_engine/AudioClipPlayer.cpp
     src/nux_engine/AudioClipStore.cpp
+    src/nux_engine/InputRecorder.cpp
     src/nux_engine/AudioEngine.cpp
     src/nux_engine/ChannelStrip.cpp
     src/nux_engine/Synth.cpp
     src/nux_engine/PluginManager.cpp
+    src/nux_engine/PluginSlot.cpp
+    src/nux_engine/PluginRetirementQueue.cpp
     src/nux_core/ProjectDocument.cpp
     src/nux_core/ProjectSerializer.cpp
+    src/nux_core/InsertParameters.cpp
+    src/nux_core/UndoHistory.cpp
     src/nux_core/TrackModel.cpp)
 
 target_include_directories(NUX PRIVATE src)

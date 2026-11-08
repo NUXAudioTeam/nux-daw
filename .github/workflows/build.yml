@@ -50,6 +50,15 @@ jobs:
       - name: Run the unit tests
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Check that the plugin hosting tests really ran
+        shell: pwsh
+        run: |
+          # The plugin host tests need the VST3 test plugins. If they were not built
+          # the tests skip, and this step makes that visible instead of quietly green.
+          $plugins = Get-ChildItem -Path build -Recurse -Filter "NUX Test Gain.vst3" -ErrorAction SilentlyContinue
+          if (-not $plugins) { throw "The VST3 test plugins were not built, so plugin hosting was not verified." }
+          $plugins | ForEach-Object { Write-Host "Found: $($_.FullName)" }
+
       - name: Check that the application binary exists
         shell: pwsh
         run: |
@@ -94,3 +103,9 @@ jobs:
 
       - name: Run the unit tests
         run: ctest --test-dir build --output-on-failure
+
+      - name: Check that the plugin hosting tests really ran
+        run: |
+          # The host tests are only meaningful when the VST3 test plugins exist.
+          find build -name "NUX Test Gain.vst3" -print -quit | grep .             || (echo "The VST3 test plugins were not built, so plugin hosting was not verified." && exit 1)
+          find build -name "NUX Test Tone.vst3" -print -quit | grep .             || (echo "The VST3 instrument test plugin was not built." && exit 1)

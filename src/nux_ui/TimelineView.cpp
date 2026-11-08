@@ -438,6 +438,8 @@ void SequencerGrid::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    document.beginEdit ("step toggle", "Toggle a step");
+
     trackState.steps[(size_t) step].enabled = ! trackState.steps[(size_t) step].enabled;
 
     if (trackState.steps[(size_t) step].enabled)
@@ -476,6 +478,8 @@ void SequencerGrid::mouseDrag (const juce::MouseEvent& e)
         return;
 
     trackState.steps[(size_t) step].enabled = true;
+    document.beginEdit ("step paint", "Paint steps");
+
     trackState.steps[(size_t) step].velocity = 0.9f;
 
     lastClickStep = step;
@@ -516,6 +520,8 @@ TimelineView::TimelineView (ProjectDocument& d, AudioEngine& e)
         if ((int) state.tracks.size() >= constants::maxTracks)
             return;
 
+        document.beginEdit ("add track", "Add a track");
+
         TrackState track;
         track.id = "trk-" + juce::String (juce::Random::getSystemRandom().nextInt (100000));
         track.name = "Track " + juce::String ((int) state.tracks.size() + 1);
@@ -540,6 +546,9 @@ TimelineView::TimelineView (ProjectDocument& d, AudioEngine& e)
     addPatternButton.onClick = [this]
     {
         auto& state = document.getState();
+
+        document.beginEdit ("pattern length", "Change the pattern length");
+
         state.patternLengthSteps = state.patternLengthSteps >= 32 ? 8 : state.patternLengthSteps * 2;
         engine.getTransport().setLoopLengthSteps (state.patternLengthSteps);
         engine.rebuildGraph();
@@ -559,6 +568,8 @@ TimelineView::TimelineView (ProjectDocument& d, AudioEngine& e)
         if (! juce::isPositiveAndBelow (selectedTrack, (int) state.tracks.size()))
             return;
 
+        document.beginEdit ("preset", "Change the instrument");
+
         state.tracks[(size_t) selectedTrack].instrumentPreset = juce::jmax (0, presetChooser.getSelectedId() - 1);
         engine.syncSequencerFromState();
         document.markDirty();
@@ -574,6 +585,7 @@ TimelineView::TimelineView (ProjectDocument& d, AudioEngine& e)
 
     grid.onPatternEdited = [this]
     {
+        // The edit itself already snapshotted; this is only the notification.
         document.markDirty();
 
         if (onProjectEdited)
@@ -636,6 +648,8 @@ TimelineView::TimelineView (ProjectDocument& d, AudioEngine& e)
 
             if (! juce::isPositiveAndBelow (clip, (int) list.size()))
                 return;
+
+            document.beginEdit ("clip edit", "Edit an audio clip");
 
             if (result == 1)
             {
@@ -717,6 +731,7 @@ void TimelineView::rebuild()
         mute->setToggleState (document.getState().tracks[(size_t) i].muted, juce::dontSendNotification);
         mute->onClick = [this, i, button = mute.get()]
         {
+            document.beginEdit ("mute", "Toggle mute");
             document.getState().tracks[(size_t) i].muted = button->getToggleState();
             engine.syncMixerFromState();
             document.markDirty();
@@ -727,6 +742,7 @@ void TimelineView::rebuild()
         solo->setToggleState (document.getState().tracks[(size_t) i].soloed, juce::dontSendNotification);
         solo->onClick = [this, i, button = solo.get()]
         {
+            document.beginEdit ("solo", "Toggle solo");
             document.getState().tracks[(size_t) i].soloed = button->getToggleState();
             engine.syncMixerFromState();
             document.markDirty();
@@ -743,6 +759,7 @@ void TimelineView::rebuild()
                 other->setToggleState (false, juce::dontSendNotification);
 
             button->setToggleState (armed, juce::dontSendNotification);
+            document.beginEdit ("record arm", "Arm a track for recording");
             document.getState().tracks[(size_t) i].recordArmed = armed;
             document.markDirty();
         };
@@ -753,6 +770,7 @@ void TimelineView::rebuild()
         knob->setSuffix (" dB");
         knob->onValueChange = [this, i] (double value)
         {
+            document.beginEdit ("volume", "Change the volume");
             document.getState().tracks[(size_t) i].volumeDb = (float) value;
             engine.syncMixerFromState();
             document.markDirty();
@@ -965,6 +983,11 @@ void TimelineView::showTrackMenu (int trackIndex)
                          document.getState().tracks[(size_t) trackIndex].busIndex == i);
 
     menu.addSubMenu ("Output bus", busMenu);
+    menu.addSeparator();
+    menu.addItem (5, "Load instrument plugin...");
+    menu.addItem (6, "Use the built-in sampler",
+                  document.getState().tracks[(size_t) trackIndex].instrumentPlugin.isValid());
+    menu.addSeparator();
     menu.addItem (4, "Import audio file...");
     menu.addSeparator();
     menu.addItem (1, "Rename track...");
@@ -987,6 +1010,21 @@ void TimelineView::showTrackMenu (int trackIndex)
         {
             tracks[(size_t) trackIndex].busIndex = result - 200;
         }
+        else if (result == 5)
+        {
+            // Pick a hosted instrument for this track. The reference is written into
+            // the model first and the engine instantiates it from there, so the
+            // project is always the source of truth (and undo works for free).
+            if (onInstrumentPluginRequested)
+                onInstrumentPluginRequested (trackIndex);
+            return;
+        }
+        else if (result == 6)
+        {
+            if (onClearInstrumentPlugin)
+                onClearInstrumentPlugin (trackIndex);
+            return;
+        }
         else if (result == 1)
         {
             auto* aw = new juce::AlertWindow ("Rename track", "", juce::MessageBoxIconType::NoIcon);
@@ -1000,7 +1038,10 @@ void TimelineView::showTrackMenu (int trackIndex)
                     auto name = aw->getTextEditorContents ("name");
 
                     if (name.isNotEmpty())
+                    {
+                        document.beginEdit ("track rename", "Rename a track");
                         document.getState().tracks[(size_t) trackIndex].name = name;
+                    }
 
                     document.markDirty();
                     repaint();
@@ -1010,6 +1051,8 @@ void TimelineView::showTrackMenu (int trackIndex)
         }
         else if (result == 2)
         {
+            document.beginEdit ("duplicate track", "Duplicate a track");
+
             auto copy = tracks[(size_t) trackIndex];
             copy.id = "trk-" + juce::String (juce::Random::getSystemRandom().nextInt (100000));
             copy.name += " copy";
@@ -1020,7 +1063,10 @@ void TimelineView::showTrackMenu (int trackIndex)
         else if (result == 3)
         {
             if (tracks.size() > 1)
+            {
+                document.beginEdit ("delete track", "Delete a track");
                 tracks.erase (tracks.begin() + trackIndex);
+            }
         }
         else if (result == 4)
         {
