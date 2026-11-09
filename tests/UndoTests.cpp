@@ -161,9 +161,18 @@ public:
             document.beginEdit ("x", "Change something");
             document.getState().tracks[0].name = "Changed";
 
+            document.beginEdit ("y", "Change something else");
+            document.getState().tracks[0].volumeDb = -6.0f;
+
+            // One of the two edits undone: the project still differs from the saved state.
             expect (document.undo());
             expect (document.hasUnsavedChanges(),
-                    "Undoing back to the saved state still counts as unsaved work");
+                    "An undo that stops short of the saved state is still unsaved work");
+
+            // Both undone: we are back where we started, so the marker goes (D3).
+            expect (document.undo());
+            expect (! document.hasUnsavedChanges(),
+                    "Undoing all the way back to the saved state is not unsaved work");
         }
 
         beginTest ("An empty history does nothing and says so");

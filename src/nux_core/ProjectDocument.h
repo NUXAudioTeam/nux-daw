@@ -56,20 +56,35 @@ public:
     int getUndoCount() const noexcept { return history.getUndoCount(); }
     int getHistorySteps() const noexcept { return history.getUndoCount(); }
 
-    /** True when the most recent change message came from an undo or redo, so the
-        host knows to rebuild the audio graph rather than just repaint. */
-    bool wasLastChangeAnUndo() const noexcept { return lastChangeWasUndo; }
+    /** Where the most recent change message came from.
+
+        `edit` is an ordinary change; `undo` and `redo` mean the whole project was replaced
+        from a snapshot, so the host has to rebuild the audio graph rather than just repaint.
+        This used to be a bool that was set by undo, never cleared, and also set by redo. */
+    enum class ChangeOrigin { edit, undo, redo };
+
+    ChangeOrigin getLastChangeOrigin() const noexcept { return lastChangeOrigin; }
+
+    /** Kept for existing callers: true when the last change was a snapshot restore. */
+    bool wasLastChangeAnUndo() const noexcept { return lastChangeOrigin != ChangeOrigin::edit; }
 
     /** Clears the history (a new or freshly opened project starts with none). */
     void clearHistory();
 
 private:
-    bool restoreFromJson (const juce::String& json, bool isUndo);
+    bool restoreFromJson (const juce::String& json, ChangeOrigin origin);
+
+    /** True when the project differs from what is on disk. D3. */
+    bool differsFromSavedState() const;
 
     ProjectState state;
     juce::File currentFile;
     bool dirty = false;
-    bool lastChangeWasUndo = false;
+    ChangeOrigin lastChangeOrigin = ChangeOrigin::edit;
+
+    /** The project as it was at the last save or load. Undo compares against this so a
+        project can be clean again without being saved twice. */
+    juce::String savedJson;
     UndoHistory history;
 };
 }

@@ -18,7 +18,22 @@ void UndoHistory::beginEdit (const ProjectState& state, const juce::String& key,
         return;
     }
 
-    undoStack.push_back ({ serializer::toJson (state), description });
+    auto snapshot = serializer::toJson (state);
+
+    // D1: an edit that changes nothing must not push a step.
+    //
+    // This happens more often than it sounds: a caller that calls beginEdit() twice for one
+    // change, or calls it and then bails out, used to push a snapshot identical to the one
+    // below it. Undo then restored the state it already had - the user pressed Ctrl+Z, saw
+    // nothing happen, pressed again, and lost two edits at once.
+    if (! undoStack.empty() && undoStack.back().json == snapshot)
+    {
+        lastEditKey = key;
+        lastEditTimeMs = now;
+        return;
+    }
+
+    undoStack.push_back ({ std::move (snapshot), description });
 
     if ((int) undoStack.size() > maximumSteps)
         undoStack.erase (undoStack.begin());
