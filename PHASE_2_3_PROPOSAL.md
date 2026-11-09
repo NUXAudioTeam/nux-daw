@@ -1,7 +1,13 @@
-# Phase 2.3 — Undo/Redo Reliability: proposal only
+# Phase 2.3 — Undo/Redo Reliability: approved and implemented
 
-> **Nothing in this document has been implemented.** No code was written, no branch was
-> created, no test was run. This is the defect list and the plan, for approval.
+> **Status: approved by the user, and D1–D4 are implemented.** The work is on branch
+> `feature/undo-reliability`, in PR #10. D1, D2, D3 and D4 are done; nothing outside the scope
+> below was added. The measured results — the pre-fix (red) runs, the post-fix runs, the
+> full-suite regression and the CI runs — are in `UNDO_REDO_TEST_REPORT.md`.
+>
+> The sections below are the original proposal, kept unchanged as the record of what was
+> approved and why. Their "proposal / for approval" wording describes the document as it was
+> written at audit time, not the current state of the code.
 
 Audited on 2026-11-08 against `feature/recording-reliability` (`123793e`).
 Evidence below is from the actual source: `src/nux_core/UndoHistory.cpp`,
@@ -146,3 +152,29 @@ This is the test I would write first, because it decides whether D1–D3 are the
 
 Roughly 200 lines of source, 400 of tests. The work is verification-heavy by design: four of the
 six defects are about what the code *claims*, not about what it computes.
+
+---
+
+## 9. Implementation status
+
+| Item | Status | Where |
+|---|---|---|
+| **D1** — a repeated `beginEdit()` must not push a dead step | **implemented** | `src/nux_core/UndoHistory.cpp` |
+| **D2** — the document must say which way the history moved (redo was reported as undo) | **implemented** | `src/nux_core/ProjectDocument.{h,cpp}` |
+| **D3** — undoing back to the saved state must clear `*`; redo must re-dirty it | **implemented**, decision as approved | `src/nux_core/ProjectDocument.{h,cpp}` |
+| **D4** — the undo round trip must be proven field by field | **implemented** | `tests/UndoReliabilityTests.cpp` |
+| Boundary table (coalescing, 120-step cap, redo stack, project switch, recorded take) | **covered** | `tests/UndoReliabilityTests.cpp` |
+| `UNDO_REDO_TEST_REPORT.md` | **written**, with actual results | repository root |
+
+No item outside D1–D4 was added to the scope.
+
+The estimate in §8 held: the source change is small, and the tests are the bulk of the work.
+
+Verification summary, all of it measured:
+
+* every new group was run against the pre-fix code first and **failed** there;
+* after the fix: `NUXTests` **19/19 groups pass** locally (Linux Release, g++ 14.2, JUCE 9.0.5);
+* CI **4/4 jobs success** on both the push and the pull-request run (Linux Release, Linux TSan,
+  Windows Debug + leak detector, Windows Release);
+* the recorded take undo keeps the recorded file on disk;
+* **not** verified: no GUI click-through, no physical hardware, no macOS build.
